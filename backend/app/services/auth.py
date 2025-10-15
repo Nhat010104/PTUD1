@@ -1,11 +1,13 @@
 """Authentication helpers including password hashing and JWT handling."""
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordBearer
 
 from ..config import get_settings
 
@@ -43,3 +45,14 @@ def decode_access_token(token: str) -> Optional[str]:
         return payload.get("sub")
     except JWTError:
         return None
+
+
+def generate_reset_token() -> tuple[str, str]:
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    return token, token_hash
+
+
+def match_reset_token(raw_token: str, token_hash: str) -> bool:
+    calculated = hashlib.sha256(raw_token.encode()).hexdigest()
+    return secrets.compare_digest(calculated, token_hash)

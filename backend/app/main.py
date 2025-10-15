@@ -1,8 +1,10 @@
 """FastAPI application entrypoint."""
 
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from fastapi.staticfiles import StaticFiles
 
@@ -12,27 +14,40 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 
 from .config import get_settings
-from .db.models import Description, User
+from .db.models import AgentMessage as AgentMessageModel
+from .db.models import AgentSession as AgentSessionModel
+from .db.models import Description, PasswordResetToken, User
 from .db.session import engine, get_session, init_db
 from .schemas import (
     DescriptionResponse,
     ExportRequest,
     GenerateTextRequest,
     HistoryItem,
+    AgentRequest,
+    AgentMessagePayload,
+    AgentResponsePayload,
+    AgentSessionDetail,
+    AgentSessionSummary,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    MessageResponse,
+    ResetPasswordRequest,
     TokenResponse,
     UserCreate,
     UserOut,
 )
+from .services import agent as agent_service
 from .services import auth, content, exporters, history as history_service, seo, templates
 from sqlmodel import Session, select
 
 
 app = FastAPI(title="AI Product Description Service")
 
-STATIC_DIR = Path("static/images")
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
+BASE_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+IMAGES_DIR = BASE_STATIC_DIR / "images"
+IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=BASE_STATIC_DIR), name="static")
 
 
 @app.on_event("startup")
@@ -102,6 +117,80 @@ def login(payload: UserCreate, session: Session = Depends(get_session)) -> Token
     return TokenResponse(access_token=token)
 
 
+@app.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    session: Session = Depends(get_session),
+) -> ForgotPasswordResponse:
+    email = payload.email.strip().lower()
+    message = "Nếu email tồn tại, mã đặt lại đã được tạo."
+    reset_token: Optional[str] = None
+
+    user = session.exec(select(User).where(User.email == email)).first()
+    if not user:
+        return ForgotPasswordResponse(message=message, reset_token=reset_token)
+
+    existing_tokens = session.exec(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used.is_(False))
+    ).all()
+    for token in existing_tokens:
+        token.used = True
+        session.add(token)
+
+    raw_token, token_hash = auth.generate_reset_token()
+    reset_entry = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.utcnow() + timedelta(minutes=30),
+    )
+    session.add(reset_entry)
+    session.commit()
+
+    message = "Mã đặt lại mật khẩu đã được tạo."
+    reset_token = raw_token
+
+    return ForgotPasswordResponse(message=message, reset_token=reset_token)
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    session: Session = Depends(get_session),
+) -> MessageResponse:
+    email = payload.email.strip().lower()
+    token_value = payload.token.strip()
+    user = session.exec(select(User).where(User.email == email)).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Email hoặc mã đặt lại không hợp lệ")
+
+    tokens = session.exec(
+        select(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used.is_(False),
+            PasswordResetToken.expires_at >= datetime.utcnow(),
+        )
+    ).all()
+
+    matched_token = None
+    for token in tokens:
+        if auth.match_reset_token(token_value, token.token_hash):
+            matched_token = token
+            break
+
+    if not matched_token:
+        raise HTTPException(status_code=400, detail="Mã đặt lại không hợp lệ hoặc đã hết hạn")
+
+    user.hashed_password = auth.hash_password(payload.new_password)
+    matched_token.used = True
+    session.add(user)
+    session.add(matched_token)
+    session.commit()
+
+    return MessageResponse(message="Mật khẩu đã được cập nhật. Vui lòng đăng nhập lại.")
+
+
 @app.get("/auth/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
     return UserOut(id=current_user.id, email=current_user.email, created_at=current_user.created_at.isoformat())
@@ -122,11 +211,20 @@ async def generate_description_from_image(
     except UnidentifiedImageError as exc:
         raise HTTPException(status_code=400, detail="Tệp hình ảnh không hợp lệ") from exc
 
-    filename = f"{current_user.id}_{session.exec(select(Description).count())}_{file.filename or 'upload' }"
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png"}:
+        suffix = ".jpg"
+    filename = f"{current_user.id}_{uuid4().hex}{suffix}"
+    relative_image_path = Path("images") / filename
     image_path: Optional[Path] = None
     try:
-        image_path = STATIC_DIR / filename
-        image.save(image_path)
+        image_path = IMAGES_DIR / filename
+        save_kwargs = {}
+        if suffix in {".jpg", ".jpeg"}:
+            save_kwargs["format"] = "JPEG"
+        elif suffix == ".png":
+            save_kwargs["format"] = "PNG"
+        image.save(image_path, **save_kwargs)
     except Exception:  # noqa: BLE001
         image_path = None
 
@@ -140,7 +238,7 @@ async def generate_description_from_image(
         source="image",
         style=style,
         content=description,
-        image_path=str(image_path) if image_path else None,
+        image_path=relative_image_path.as_posix() if image_path else None,
     )
     session.add(db_entry)
     session.commit()
@@ -155,6 +253,7 @@ async def generate_description_from_image(
         timestamp=entry["timestamp"],
         style=entry["style"],
         source=entry["source"],
+        image_url=entry.get("image_url"),
     )
 
 
@@ -185,6 +284,141 @@ async def generate_description_from_text(
         timestamp=entry["timestamp"],
         style=entry["style"],
         source=entry["source"],
+        image_url=entry.get("image_url"),
+    )
+
+
+@app.post("/api/agent/chat", response_model=AgentResponsePayload)
+def agent_chat(
+    payload: AgentRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> AgentResponsePayload:
+    settings = get_settings()
+
+    if not payload.messages:
+        raise HTTPException(status_code=400, detail="Thiếu hội thoại đầu vào")
+
+    latest_message = payload.messages[-1]
+    if latest_message.role != "user":
+        raise HTTPException(status_code=400, detail="Tin nhắn cuối phải thuộc về người dùng")
+
+    agent_session: Optional[AgentSessionModel] = None
+    if payload.session_id is not None:
+        agent_session = session.get(AgentSessionModel, payload.session_id)
+        if not agent_session or agent_session.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiên agent")
+    else:
+        title = agent_service.generate_session_title(latest_message.content)
+        agent_session = AgentSessionModel(user_id=current_user.id, title=title)
+        session.add(agent_session)
+        session.commit()
+        session.refresh(agent_session)
+
+    stored_messages = session.exec(
+        select(AgentMessageModel)
+        .where(AgentMessageModel.session_id == agent_session.id)
+        .order_by(AgentMessageModel.created_at.asc())
+    ).all()
+
+    conversation = [
+        agent_service.AgentMessage(role=message.role, content=message.content)
+        for message in stored_messages
+    ]
+    conversation.append(agent_service.AgentMessage(role=latest_message.role, content=latest_message.content))
+
+    result = agent_service.run_agent(settings.gemini_api_key, conversation)
+
+    session.add(
+        AgentMessageModel(session_id=agent_session.id, role="user", content=latest_message.content)
+    )
+    session.add(
+        AgentMessageModel(session_id=agent_session.id, role="assistant", content=result.reply)
+    )
+
+    agent_session.updated_at = datetime.utcnow()
+
+    history_id = None
+    timestamp = None
+    image_url = None
+    source = "agent"
+
+    if result.finished and result.description:
+        db_entry = Description(
+            user_id=current_user.id,
+            source=source,
+            style=result.style or "Marketing",
+            content=result.description,
+            image_path=None,
+        )
+        session.add(db_entry)
+        session.commit()
+        session.refresh(db_entry)
+        entry = history_service.history_item_from_db(db_entry)
+        history_id = entry["id"]
+        timestamp = entry["timestamp"]
+        image_url = entry.get("image_url")
+
+    session.commit()
+
+    return AgentResponsePayload(
+        reply=result.reply,
+        finished=result.finished,
+        description=result.description,
+        seo_score=result.seo_score,
+        seo_factors=result.seo_factors,
+        history_id=history_id,
+        timestamp=timestamp,
+        style=result.style,
+        source=source if result.finished else None,
+        image_url=image_url,
+        session_id=agent_session.id,
+        session_title=agent_session.title,
+    )
+
+
+@app.get("/api/agent/sessions", response_model=list[AgentSessionSummary])
+def list_agent_sessions(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[AgentSessionSummary]:
+    sessions = session.exec(
+        select(AgentSessionModel)
+        .where(AgentSessionModel.user_id == current_user.id)
+        .order_by(AgentSessionModel.updated_at.desc())
+    ).all()
+    return [
+        AgentSessionSummary(id=item.id, title=item.title, updated_at=item.updated_at.isoformat())
+        for item in sessions
+    ]
+
+
+@app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetail)
+def get_agent_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> AgentSessionDetail:
+    agent_session = session.get(AgentSessionModel, session_id)
+    if not agent_session or agent_session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên agent")
+
+    messages = session.exec(
+        select(AgentMessageModel)
+        .where(AgentMessageModel.session_id == session_id)
+        .order_by(AgentMessageModel.created_at.asc())
+    ).all()
+
+    payload = [
+        AgentMessagePayload(role=message.role, content=message.content)
+        for message in messages
+    ]
+
+    return AgentSessionDetail(
+        id=agent_session.id,
+        title=agent_session.title,
+        updated_at=agent_session.updated_at.isoformat(),
+        messages=payload,
     )
 
 

@@ -6,8 +6,8 @@ import axios from "axios";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-type TabKey = "image" | "text" | "templates";
-type AuthMode = "login" | "register";
+type TabKey = "image" | "text" | "templates" | "agent";
+type AuthMode = "login" | "register" | "forgot" | "reset";
 type DownloadKind = "docx" | "pdf";
 
 interface DescriptionResponse {
@@ -18,6 +18,7 @@ interface DescriptionResponse {
   timestamp: string;
   style: string;
   source: string;
+  image_url?: string | null;
 }
 
 interface TemplateItem {
@@ -34,11 +35,51 @@ interface HistoryItem {
   style: string;
   summary: string;
   full_description: string;
+  image_url?: string | null;
 }
 
 interface HistoryDetail extends HistoryItem {
   seo_score: number;
   seo_factors: string[];
+}
+
+interface AgentMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface AgentMessagePayload {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface AgentSessionSummary {
+  id: number;
+  title: string;
+  updated_at: string;
+}
+
+interface AgentSessionDetail {
+  id: number;
+  title: string;
+  updated_at: string;
+  messages: AgentMessagePayload[];
+}
+
+interface AgentChatResponse {
+  reply: string;
+  finished: boolean;
+  description?: string;
+  seo_score?: number;
+  seo_factors?: string[];
+  history_id?: string;
+  timestamp?: string;
+  style?: string;
+  source?: string;
+  image_url?: string | null;
+  session_id: number;
+  session_title: string;
 }
 
 interface ImageItem {
@@ -56,6 +97,15 @@ interface User {
 interface TokenResponse {
   access_token: string;
   token_type: string;
+}
+
+interface ForgotPasswordResponse {
+  message: string;
+  reset_token?: string;
+}
+
+interface MessageResponse {
+  message: string;
 }
 
 type ToastKind = "error" | "success";
@@ -133,6 +183,40 @@ export default function HomePage() {
   const [templateDetail, setTemplateDetail] = useState<TemplateItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [agentInput, setAgentInput] = useState<string>("");
+  const [agentLoading, setAgentLoading] = useState<boolean>(false);
+  const [agentSessions, setAgentSessions] = useState<AgentSessionSummary[]>([]);
+  const [agentSessionId, setAgentSessionId] = useState<number | null>(null);
+  const [agentSessionTitle, setAgentSessionTitle] = useState<string | null>(null);
+
+  const generateMessageId = useCallback(
+    () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+    []
+  );
+
+  const resetAgentConversation = useCallback(() => {
+    setAgentMessages([
+      {
+        id: generateMessageId(),
+        role: "assistant",
+        content: "Chào bạn! Hãy cho mình biết bạn muốn tạo mô tả cho sản phẩm nào nhé.",
+      },
+    ]);
+    setAgentInput("");
+    setAgentSessionId(null);
+    setAgentSessionTitle(null);
+  }, [generateMessageId]);
+
+  const mapAgentMessages = useCallback(
+    (messages: AgentMessagePayload[]) =>
+      messages.map((message) => ({
+        id: generateMessageId(),
+        role: message.role,
+        content: message.content,
+      })),
+    [generateMessageId]
+  );
 
   const [images, setImages] = useState<ImageItem[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
@@ -154,6 +238,9 @@ export default function HomePage() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetForm, setResetForm] = useState({ email: "", token: "", password: "", confirmPassword: "" });
+  const [resetTokenHint, setResetTokenHint] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [authMessage, setAuthMessage] = useState<{ type: ToastKind; message: string } | null>(null);
 
@@ -192,7 +279,7 @@ export default function HomePage() {
     }
   }, [showToast]);
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     const stream = streamRef.current;
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -202,9 +289,28 @@ export default function HomePage() {
       videoRef.current.srcObject = null;
     }
     setCameraActive(false);
-  };
+  }, []);
 
-  useEffect(() => () => stopCamera(), []);
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  useEffect(() => {
+    if (!cameraActive) {
+      return;
+    }
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) {
+      return;
+    }
+    video.srcObject = stream;
+    video
+      .play()
+      .catch((err) => {
+        console.error(err);
+        showToast("error", "Không thể hiển thị camera.");
+        stopCamera();
+      });
+  }, [cameraActive, showToast, stopCamera]);
 
   useEffect(() => () => {
     previewsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -242,7 +348,7 @@ export default function HomePage() {
     void fetchProtectedData(token);
   }, [token, fetchProtectedData]);
 
-  const refreshHistory = async () => {
+  const refreshHistory = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -255,26 +361,93 @@ export default function HomePage() {
         showToast("error", "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.");
       }
     }
-  };
+  }, [showToast, token]);
 
-  const handleUnauthorized = (err: any) => {
-    if (err?.response?.status === 401) {
-      setToken(null);
-      showToast("error", "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.");
-      return true;
+  const handleUnauthorized = useCallback(
+    (err: any) => {
+      if (err?.response?.status === 401) {
+        setToken(null);
+        showToast("error", "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.");
+        return true;
+      }
+      return false;
+    },
+    [showToast]
+  );
+
+  const isAuthenticated = Boolean(token && user);
+
+  const loadAgentSession = useCallback(
+    async (sessionIdValue: number) => {
+      if (!token) {
+        return;
+      }
+      try {
+        const { data } = await axios.get<AgentSessionDetail>(
+          `${API_BASE_URL}/api/agent/sessions/${sessionIdValue}`
+        );
+        setAgentSessionId(data.id);
+        setAgentSessionTitle(data.title);
+        setAgentMessages(mapAgentMessages(data.messages));
+        setAgentInput("");
+      } catch (err: any) {
+        if (handleUnauthorized(err)) {
+          setAgentSessions([]);
+          resetAgentConversation();
+          return;
+        }
+        const detail = err?.response?.data?.detail ?? "Không thể tải phiên agent.";
+        showToast("error", detail);
+      }
+    },
+    [handleUnauthorized, mapAgentMessages, resetAgentConversation, showToast, token]
+  );
+
+  const fetchAgentSessions = useCallback(async () => {
+    if (!token) {
+      setAgentSessions([]);
+      return;
     }
-    return false;
-  };
+    try {
+      const { data } = await axios.get<AgentSessionSummary[]>(`${API_BASE_URL}/api/agent/sessions`);
+      setAgentSessions(data);
+      if (!data.length) {
+        resetAgentConversation();
+        return;
+      }
+      const existingIds = data.map((item) => item.id);
+      if (agentSessionId && !existingIds.includes(agentSessionId)) {
+        setAgentSessionId(null);
+      }
+      if (agentSessionId === null) {
+        await loadAgentSession(data[0].id);
+      }
+    } catch (err: any) {
+      if (handleUnauthorized(err)) {
+        setAgentSessions([]);
+        return;
+      }
+      console.error(err);
+    }
+  }, [agentSessionId, handleUnauthorized, loadAgentSession, resetAgentConversation, token]);
+
+  useEffect(() => {
+    if (activeTab === "agent" && isAuthenticated) {
+      void fetchAgentSessions();
+    }
+  }, [activeTab, fetchAgentSessions, isAuthenticated]);
+
+  useEffect(() => {
+    if (activeTab === "agent" && !isAuthenticated && agentMessages.length === 0) {
+      resetAgentConversation();
+    }
+  }, [activeTab, agentMessages.length, isAuthenticated, resetAgentConversation]);
 
   const startCamera = async () => {
     clearToast();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
       setCameraActive(true);
       showToast("success", "Camera đã bật");
     } catch (err) {
@@ -472,8 +645,87 @@ export default function HomePage() {
     }
   };
 
+  const handleAgentSend = useCallback(async () => {
+    if (!token) {
+      showToast("error", "Vui lòng đăng nhập để sử dụng agent.");
+      setAuthVisible(true);
+      return;
+    }
+    const message = agentInput.trim();
+    if (!message || agentLoading) {
+      return;
+    }
+    const userMessage: AgentMessage = { id: generateMessageId(), role: "user", content: message };
+    const conversation = [...agentMessages, userMessage];
+    setAgentMessages(conversation);
+    setAgentInput("");
+    setAgentLoading(true);
+    try {
+      const { data } = await axios.post<AgentChatResponse>(`${API_BASE_URL}/api/agent/chat`, {
+        messages: conversation.map(({ role, content }) => ({ role, content })),
+        session_id: agentSessionId,
+      });
+      setAgentSessionId(data.session_id);
+      setAgentSessionTitle(data.session_title);
+      setAgentMessages((prev) => [
+        ...prev,
+        { id: generateMessageId(), role: "assistant", content: data.reply },
+      ]);
+      await fetchAgentSessions();
+      if (data.finished && data.description) {
+        const evaluation =
+          typeof data.seo_score === "number" && Array.isArray(data.seo_factors)
+            ? { score: data.seo_score, factors: data.seo_factors }
+            : evaluateSeo(data.description);
+        const historyId = data.history_id ?? `agent-${Date.now()}`;
+        const timestamp = data.timestamp ?? new Date().toISOString();
+        const style = data.style ?? "Marketing";
+        const source = data.source ?? "agent";
+        setResult({
+          description: data.description,
+          seo_score: evaluation.score,
+          seo_factors: evaluation.factors,
+          history_id: historyId,
+          timestamp,
+          style,
+          source,
+          image_url: data.image_url ?? null,
+        });
+        setSeoFactors(evaluation.factors);
+        await refreshHistory();
+      }
+    } catch (err: any) {
+      if (handleUnauthorized(err)) {
+        return;
+      }
+      const detail = err?.response?.data?.detail ?? "Agent gặp lỗi, vui lòng thử lại.";
+      setAgentMessages((prev) => [
+        ...prev,
+        { id: generateMessageId(), role: "assistant", content: detail },
+      ]);
+      showToast("error", detail);
+    } finally {
+      setAgentLoading(false);
+    }
+  }, [
+    agentInput,
+    agentLoading,
+    agentMessages,
+    agentSessionId,
+    generateMessageId,
+    handleUnauthorized,
+    refreshHistory,
+    fetchAgentSessions,
+    setAuthVisible,
+    showToast,
+    token,
+  ]);
+
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (authMode !== "login" && authMode !== "register") {
+      return;
+    }
     setAuthLoading(true);
     clearToast();
     setAuthMessage(null);
@@ -517,6 +769,99 @@ export default function HomePage() {
     }
   };
 
+  const handleForgotSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    clearToast();
+    setAuthMessage(null);
+    setResetTokenHint(null);
+    try {
+      const email = forgotEmail.trim().toLowerCase();
+      if (!email) {
+        const message = "Vui lòng nhập email đã đăng ký.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      const { data } = await axios.post<ForgotPasswordResponse>(
+        `${API_BASE_URL}/auth/forgot-password`,
+        { email }
+      );
+      setAuthMessage({ type: "success", message: data.message });
+      showToast("success", data.message);
+      setForgotEmail("");
+      if (data.reset_token) {
+        setResetTokenHint(data.reset_token);
+        setResetForm({ email, token: data.reset_token, password: "", confirmPassword: "" });
+        setAuthMode("reset");
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail ?? "Không thể tạo mã đặt lại";
+      setAuthMessage({ type: "error", message: detail });
+      showToast("error", detail);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleResetSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    clearToast();
+    setAuthMessage(null);
+    try {
+      const email = resetForm.email.trim().toLowerCase();
+      const tokenValue = resetForm.token.trim();
+      const password = resetForm.password.trim();
+      const confirm = resetForm.confirmPassword.trim();
+      if (!email || !tokenValue || !password) {
+        const message = "Vui lòng nhập đầy đủ email, mã đặt lại và mật khẩu mới.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (password !== confirm) {
+        const message = "Mật khẩu xác nhận không khớp.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/reset-password`, {
+        email,
+        token: tokenValue,
+        new_password: password,
+      });
+      setAuthMessage({ type: "success", message: data.message });
+      showToast("success", data.message);
+      setResetForm({ email: "", token: "", password: "", confirmPassword: "" });
+      setResetTokenHint(null);
+      setAuthMode("login");
+      setAuthForm({ email, password: "" });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail ?? "Không thể đặt lại mật khẩu";
+      setAuthMessage({ type: "error", message: detail });
+      showToast("error", detail);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const changeAuthMode = (mode: AuthMode) => {
+    setAuthMode(mode);
+    setAuthMessage(null);
+    setAuthLoading(false);
+    if (mode !== "reset") {
+      setResetTokenHint(null);
+      setResetForm({ email: "", token: "", password: "", confirmPassword: "" });
+    }
+    if (mode !== "forgot") {
+      setForgotEmail("");
+    }
+  };
+
   const handleLogout = () => {
     setToken(null);
     if (typeof window !== "undefined") {
@@ -525,6 +870,8 @@ export default function HomePage() {
     setUser(null);
     setHistory([]);
     setResult(null);
+    setAgentSessions([]);
+    resetAgentConversation();
     stopCamera();
     showToast("success", "Đã đăng xuất");
   };
@@ -541,8 +888,6 @@ export default function HomePage() {
     }
     return images[0];
   }, [images, selectedImageId]);
-
-  const isAuthenticated = Boolean(token && user);
 
   const seoScoreClass = useMemo(() => {
     if (!result) return "";
@@ -573,8 +918,8 @@ export default function HomePage() {
               <button
                 className="primary-button"
                 onClick={() => {
-                  setAuthMode("login");
-                  setAuthMessage(null);
+                  changeAuthMode("login");
+                  setAuthForm({ email: "", password: "" });
                   setAuthVisible(true);
                 }}
               >
@@ -620,6 +965,12 @@ export default function HomePage() {
               onClick={() => setActiveTab("templates")}
             >
               📚 Thư viện mẫu
+            </button>
+            <button
+              className={`tab-button ${activeTab === "agent" ? "active" : ""}`}
+              onClick={() => setActiveTab("agent")}
+            >
+              🤖 Agent AI
             </button>
           </div>
         </div>
@@ -903,6 +1254,149 @@ export default function HomePage() {
           </div>
         )}
 
+        {activeTab === "agent" && (
+          <div className="section">
+            <div className="card">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 12,
+                  }}
+                >
+                  <h2 style={{ margin: 0 }}>🤖 Trợ lý AI tạo mô tả</h2>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {isAuthenticated && (
+                      <select
+                        value={agentSessionId ?? ""}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === "") {
+                            resetAgentConversation();
+                            return;
+                          }
+                          const numericValue = Number(value);
+                          if (!Number.isNaN(numericValue)) {
+                            void loadAgentSession(numericValue);
+                          }
+                        }}
+                        style={{ padding: "8px 12px", borderRadius: 16, border: "1px solid rgba(0,0,0,0.1)" }}
+                      >
+                        <option value="">Phiên mới</option>
+                        {agentSessions.map((sessionItem) => (
+                          <option key={sessionItem.id} value={sessionItem.id}>
+                            {sessionItem.title}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button className="secondary-button" onClick={resetAgentConversation} disabled={agentLoading}>
+                      Tạo phiên mới
+                    </button>
+                  </div>
+                </div>
+                <p style={{ color: "var(--text-secondary)", margin: 0 }}>
+                  Đặt mục tiêu cho agent, ví dụ: &ldquo;Tạo mô tả sang trọng cho hộp quà táo nhập khẩu&rdquo;.
+                </p>
+                {!isAuthenticated && (
+                  <p style={{ color: "var(--accent-orange)", fontWeight: 600, margin: 0 }}>
+                    Bạn cần đăng nhập để sử dụng agent và lưu lịch sử mô tả.
+                  </p>
+                )}
+                {agentSessionTitle && (
+                  <p style={{ color: "var(--text-secondary)", margin: 0 }}>
+                    Phiên hiện tại: {agentSessionTitle}
+                  </p>
+                )}
+              </div>
+              <div
+                style={{
+                  marginTop: 20,
+                  padding: 16,
+                  background: "#f7f9fc",
+                  borderRadius: 20,
+                  maxHeight: 320,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                {agentMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: message.role === "user" ? "flex-end" : "flex-start",
+                    }}
+                  >
+                    <div
+                      style={{
+                        maxWidth: "82%",
+                        background:
+                          message.role === "user" ? "var(--accent-orange)" : "rgba(255, 255, 255, 0.9)",
+                        color: message.role === "user" ? "#fff" : "var(--text-primary)",
+                        padding: "12px 16px",
+                        borderRadius:
+                          message.role === "user"
+                            ? "18px 18px 6px 18px"
+                            : "18px 18px 18px 6px",
+                        boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
+                        whiteSpace: "pre-line",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {message.content}
+                    </div>
+                  </div>
+                ))}
+                {agentLoading && (
+                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <div
+                      style={{
+                        background: "rgba(255,255,255,0.9)",
+                        padding: "10px 14px",
+                        borderRadius: "18px 18px 18px 6px",
+                        boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      Agent đang suy nghĩ...
+                    </div>
+                  </div>
+                )}
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleAgentSend();
+                }}
+                style={{ display: "flex", gap: 12, marginTop: 20 }}
+              >
+                <textarea
+                  rows={2}
+                  placeholder="Mô tả nhanh nhu cầu của bạn..."
+                  value={agentInput}
+                  onChange={(event) => setAgentInput(event.target.value)}
+                  style={{ flex: 1, resize: "none" }}
+                  disabled={agentLoading}
+                />
+                <button
+                  type="submit"
+                  className="primary-button"
+                  style={{ minWidth: 120, alignSelf: "stretch" }}
+                  disabled={agentLoading || !agentInput.trim()}
+                >
+                  {agentLoading ? "Đang xử lý..." : "Gửi"}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
         <div className="section">
           <h2>📜 Lịch sử mô tả</h2>
           {!isAuthenticated ? (
@@ -922,6 +1416,27 @@ export default function HomePage() {
                   <span style={{ color: "var(--accent-orange)", fontWeight: 600 }}>
                     Phong cách: {item.style}
                   </span>
+                  {item.image_url && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        border: "1px solid rgba(0,0,0,0.05)",
+                        position: "relative",
+                        width: "100%",
+                        height: 160,
+                      }}
+                    >
+                      <Image
+                        src={`${API_BASE_URL}${item.image_url}`}
+                        alt="Ảnh mô tả"
+                        fill
+                        sizes="(max-width: 768px) 100vw, 320px"
+                        style={{ objectFit: "cover" }}
+                      />
+                    </div>
+                  )}
                   <p style={{ color: "var(--text-secondary)", margin: 0 }}>{item.summary}</p>
                   <button
                     className="secondary-button"
@@ -941,6 +1456,7 @@ export default function HomePage() {
                         timestamp: item.timestamp,
                         style: item.style,
                         source: item.source,
+                        image_url: item.image_url ?? null,
                       });
                       setSeoFactors(evaluation.factors);
                     }}
@@ -1032,6 +1548,26 @@ export default function HomePage() {
                 ))}
               </ul>
             </div>
+            {historyDetail.image_url && (
+              <div
+                style={{
+                  borderRadius: 24,
+                  overflow: "hidden",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  position: "relative",
+                  width: "100%",
+                  height: "min(360px, 60vh)",
+                }}
+              >
+                <Image
+                  src={`${API_BASE_URL}${historyDetail.image_url}`}
+                  alt="Ảnh mô tả"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 640px"
+                  style={{ objectFit: "cover" }}
+                />
+              </div>
+            )}
             <div
               style={{
                 background: "#f8f9fb",
@@ -1158,7 +1694,13 @@ export default function HomePage() {
             }}
           >
             <h2 style={{ margin: 0, textAlign: "center" }}>
-              {authMode === "login" ? "Đăng nhập tài khoản" : "Đăng ký tài khoản mới"}
+              {authMode === "login"
+                ? "Đăng nhập tài khoản"
+                : authMode === "register"
+                ? "Đăng ký tài khoản mới"
+                : authMode === "forgot"
+                ? "Khôi phục mật khẩu"
+                : "Đặt lại mật khẩu"}
             </h2>
             {authMessage && (
               <div
@@ -1172,40 +1714,134 @@ export default function HomePage() {
                 {authMessage.message}
               </div>
             )}
-            <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <input
-                type="email"
-                placeholder="Email"
-                value={authForm.email}
-                onChange={(event) => setAuthForm((prev) => ({ ...prev, email: event.target.value }))}
-                required
-              />
-              <input
-                type="password"
-                placeholder="Mật khẩu (>=6 ký tự)"
-                value={authForm.password}
-                onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
-                required
-                minLength={6}
-              />
-              <button className="primary-button" type="submit" disabled={authLoading}>
-                {authLoading ? "Đang xử lý..." : authMode === "login" ? "Đăng nhập" : "Đăng ký"}
-              </button>
-            </form>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <button
-                className="secondary-button"
-                onClick={() => {
-                  setAuthMode(authMode === "login" ? "register" : "login");
-                  setAuthMessage(null);
+            {authMode === "reset" && resetTokenHint && (
+              <div
+                style={{
+                  border: "1px solid rgba(56,161,105,0.45)",
+                  background: "rgba(56,161,105,0.12)",
+                  color: "#276749",
+                  borderRadius: 16,
+                  padding: 14,
+                  textAlign: "center",
+                  fontWeight: 600,
+                  wordBreak: "break-all",
                 }}
               >
-                {authMode === "login" ? "Chưa có tài khoản? Đăng ký" : "Đã có tài khoản? Đăng nhập"}
-              </button>
+                <div>Mã đặt lại của bạn:</div>
+                <code style={{ display: "block", marginTop: 8 }}>{resetTokenHint}</code>
+              </div>
+            )}
+            {(authMode === "login" || authMode === "register") && (
+              <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={authForm.email}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, email: event.target.value }))}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Mật khẩu (>=6 ký tự)"
+                  value={authForm.password}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
+                  required
+                  minLength={6}
+                />
+                <button className="primary-button" type="submit" disabled={authLoading}>
+                  {authLoading ? "Đang xử lý..." : authMode === "login" ? "Đăng nhập" : "Đăng ký"}
+                </button>
+              </form>
+            )}
+            {authMode === "forgot" && (
+              <form onSubmit={handleForgotSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <input
+                  type="email"
+                  placeholder="Nhập email đã đăng ký"
+                  value={forgotEmail}
+                  onChange={(event) => setForgotEmail(event.target.value)}
+                  required
+                />
+                <button className="primary-button" type="submit" disabled={authLoading}>
+                  {authLoading ? "Đang xử lý..." : "Gửi mã đặt lại"}
+                </button>
+              </form>
+            )}
+            {authMode === "reset" && (
+              <form onSubmit={handleResetSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={resetForm.email}
+                  onChange={(event) => setResetForm((prev) => ({ ...prev, email: event.target.value }))}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Mã đặt lại"
+                  value={resetForm.token}
+                  onChange={(event) => setResetForm((prev) => ({ ...prev, token: event.target.value }))}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Mật khẩu mới (>=6 ký tự)"
+                  value={resetForm.password}
+                  onChange={(event) => setResetForm((prev) => ({ ...prev, password: event.target.value }))}
+                  required
+                  minLength={6}
+                />
+                <input
+                  type="password"
+                  placeholder="Nhập lại mật khẩu mới"
+                  value={resetForm.confirmPassword}
+                  onChange={(event) => setResetForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                  required
+                  minLength={6}
+                />
+                <button className="primary-button" type="submit" disabled={authLoading}>
+                  {authLoading ? "Đang xử lý..." : "Đặt lại mật khẩu"}
+                </button>
+              </form>
+            )}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {authMode === "login" && (
+                  <>
+                    <button className="secondary-button" type="button" onClick={() => changeAuthMode("register")}>
+                      Chưa có tài khoản? Đăng ký
+                    </button>
+                    <button className="secondary-button" type="button" onClick={() => changeAuthMode("forgot")}>
+                      Quên mật khẩu?
+                    </button>
+                  </>
+                )}
+                {authMode === "register" && (
+                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")}>
+                    Đã có tài khoản? Đăng nhập
+                  </button>
+                )}
+                {(authMode === "forgot" || authMode === "reset") && (
+                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")}>
+                    Quay lại đăng nhập
+                  </button>
+                )}
+              </div>
               <button
                 className="secondary-button"
+                type="button"
                 onClick={() => {
                   setAuthVisible(false);
+                  changeAuthMode("login");
+                  setAuthForm({ email: "", password: "" });
                   setAuthMessage(null);
                 }}
               >

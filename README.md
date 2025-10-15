@@ -10,6 +10,65 @@
 - **Giao diện thân thiện**: Dễ sử dụng với Streamlit
 - **Tải xuống**: Xuất mô tả dạng file text
 
+## 🔄 Workflow tổng quan
+
+```mermaid
+flowchart TD
+    subgraph UI[Frontend Next.js]
+        A1[1. Người dùng truy cập web/app]
+        A2[2. Đăng nhập/đăng ký]
+        A3[3. Chọn chế độ: Hình ảnh / Text / Agent]
+        A4[4. Nhập dữ liệu hoặc gửi yêu cầu]
+        A5[5. Xem kết quả, tải xuống, xem lịch sử]
+    end
+
+    subgraph BE[Backend FastAPI]
+        B1[6. /auth/login - xác thực JWT]
+        B2[7. /api/descriptions/image]
+        B3[8. /api/descriptions/text]
+        B4[9. /api/agent/chat]
+        B5[10. Lưu lịch sử mô tả]
+        B6[11. Lưu phiên agent & hội thoại]
+        B7[12. /api/history & /api/agent/sessions]
+        B8[13. /api/export/docx|pdf]
+    end
+
+    subgraph External[External Services]
+        C1[Google Gemini API]
+        C2[SQLite data.db]
+    end
+
+    A1 --> A2
+    A2 -->|Gửi email/mật khẩu| B1
+    B1 -->|JWT token| A2
+    A2 --> A3
+    A3 --> A4
+
+    A4 -->|POST /api/descriptions/image| B2
+    A4 -->|POST /api/descriptions/text| B3
+    A4 -->|POST /api/agent/chat| B4
+
+    B2 -->|Gọi Gemini phân tích hình| C1
+    B3 -->|Gọi Gemini sinh text| C1
+    B4 -->|Agent quyết định & gọi Gemini| C1
+
+    B2 -->|Lưu mô tả| B5
+    B3 -->|Lưu mô tả| B5
+    B4 -->|Lưu mô tả (nếu hoàn thành)| B5
+    B4 -->|Lưu hội thoại| B6
+
+    B5 -->|Ghi dữ liệu| C2
+    B6 -->|Ghi dữ liệu| C2
+
+    A5 -->|GET /api/history| B7
+    A5 -->|GET /api/agent/sessions| B7
+    B7 -->|Trả dữ liệu lịch sử & phiên| A5
+
+    A5 -->|POST /api/export/docx| B8
+    A5 -->|POST /api/export/pdf| B8
+    B8 -->|Trả file DOCX/PDF| A5
+```
+
 ## 🚀 Cài đặt
 
 ### Yêu cầu hệ thống
