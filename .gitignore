@@ -14,3 +14,7 @@ venv/
 ENV/
 .streamlit/
 .DS_Store
+node_modules/
+frontend/.next/
+frontend/node_modules/
+frontend/out/
