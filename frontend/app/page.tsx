@@ -177,7 +177,7 @@ export default function HomePage() {
   const clearToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
-    const storedToken = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const storedToken = typeof window !== "undefined" ? sessionStorage.getItem("token") : null;
     if (storedToken) {
       setToken(storedToken);
     }
@@ -489,7 +489,7 @@ export default function HomePage() {
       const newToken = data.access_token;
       setToken(newToken);
       if (typeof window !== "undefined") {
-        localStorage.setItem("token", newToken);
+        sessionStorage.setItem("token", newToken);
       }
       await fetchProtectedData(newToken);
       setAuthMessage({
@@ -607,7 +607,7 @@ export default function HomePage() {
   const handleLogout = () => {
     setToken(null);
     if (typeof window !== "undefined") {
-      localStorage.removeItem("token");
+      sessionStorage.removeItem("token");
     }
     setUser(null);
     setHistory([]);
