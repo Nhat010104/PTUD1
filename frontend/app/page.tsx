@@ -6,7 +6,7 @@ import axios from "axios";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-type TabKey = "image" | "text" | "templates" | "agent";
+type TabKey = "image" | "text" | "templates";
 type AuthMode = "login" | "register" | "forgot" | "reset";
 type DownloadKind = "docx" | "pdf";
 
@@ -41,45 +41,6 @@ interface HistoryItem {
 interface HistoryDetail extends HistoryItem {
   seo_score: number;
   seo_factors: string[];
-}
-
-interface AgentMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface AgentMessagePayload {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface AgentSessionSummary {
-  id: number;
-  title: string;
-  updated_at: string;
-}
-
-interface AgentSessionDetail {
-  id: number;
-  title: string;
-  updated_at: string;
-  messages: AgentMessagePayload[];
-}
-
-interface AgentChatResponse {
-  reply: string;
-  finished: boolean;
-  description?: string;
-  seo_score?: number;
-  seo_factors?: string[];
-  history_id?: string;
-  timestamp?: string;
-  style?: string;
-  source?: string;
-  image_url?: string | null;
-  session_id: number;
-  session_title: string;
 }
 
 interface ImageItem {
@@ -183,40 +144,6 @@ export default function HomePage() {
   const [templateDetail, setTemplateDetail] = useState<TemplateItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
-  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
-  const [agentInput, setAgentInput] = useState<string>("");
-  const [agentLoading, setAgentLoading] = useState<boolean>(false);
-  const [agentSessions, setAgentSessions] = useState<AgentSessionSummary[]>([]);
-  const [agentSessionId, setAgentSessionId] = useState<number | null>(null);
-  const [agentSessionTitle, setAgentSessionTitle] = useState<string | null>(null);
-
-  const generateMessageId = useCallback(
-    () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
-    []
-  );
-
-  const resetAgentConversation = useCallback(() => {
-    setAgentMessages([
-      {
-        id: generateMessageId(),
-        role: "assistant",
-        content: "Chào bạn! Hãy cho mình biết bạn muốn tạo mô tả cho sản phẩm nào nhé.",
-      },
-    ]);
-    setAgentInput("");
-    setAgentSessionId(null);
-    setAgentSessionTitle(null);
-  }, [generateMessageId]);
-
-  const mapAgentMessages = useCallback(
-    (messages: AgentMessagePayload[]) =>
-      messages.map((message) => ({
-        id: generateMessageId(),
-        role: message.role,
-        content: message.content,
-      })),
-    [generateMessageId]
-  );
 
   const [images, setImages] = useState<ImageItem[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
@@ -376,72 +303,6 @@ export default function HomePage() {
   );
 
   const isAuthenticated = Boolean(token && user);
-
-  const loadAgentSession = useCallback(
-    async (sessionIdValue: number) => {
-      if (!token) {
-        return;
-      }
-      try {
-        const { data } = await axios.get<AgentSessionDetail>(
-          `${API_BASE_URL}/api/agent/sessions/${sessionIdValue}`
-        );
-        setAgentSessionId(data.id);
-        setAgentSessionTitle(data.title);
-        setAgentMessages(mapAgentMessages(data.messages));
-        setAgentInput("");
-      } catch (err: any) {
-        if (handleUnauthorized(err)) {
-          setAgentSessions([]);
-          resetAgentConversation();
-          return;
-        }
-        const detail = err?.response?.data?.detail ?? "Không thể tải phiên agent.";
-        showToast("error", detail);
-      }
-    },
-    [handleUnauthorized, mapAgentMessages, resetAgentConversation, showToast, token]
-  );
-
-  const fetchAgentSessions = useCallback(async () => {
-    if (!token) {
-      setAgentSessions([]);
-      return;
-    }
-    try {
-      const { data } = await axios.get<AgentSessionSummary[]>(`${API_BASE_URL}/api/agent/sessions`);
-      setAgentSessions(data);
-      if (!data.length) {
-        resetAgentConversation();
-        return;
-      }
-      const existingIds = data.map((item) => item.id);
-      if (agentSessionId && !existingIds.includes(agentSessionId)) {
-        setAgentSessionId(null);
-      }
-      if (agentSessionId === null) {
-        await loadAgentSession(data[0].id);
-      }
-    } catch (err: any) {
-      if (handleUnauthorized(err)) {
-        setAgentSessions([]);
-        return;
-      }
-      console.error(err);
-    }
-  }, [agentSessionId, handleUnauthorized, loadAgentSession, resetAgentConversation, token]);
-
-  useEffect(() => {
-    if (activeTab === "agent" && isAuthenticated) {
-      void fetchAgentSessions();
-    }
-  }, [activeTab, fetchAgentSessions, isAuthenticated]);
-
-  useEffect(() => {
-    if (activeTab === "agent" && !isAuthenticated && agentMessages.length === 0) {
-      resetAgentConversation();
-    }
-  }, [activeTab, agentMessages.length, isAuthenticated, resetAgentConversation]);
 
   const startCamera = async () => {
     clearToast();
@@ -645,81 +506,6 @@ export default function HomePage() {
     }
   };
 
-  const handleAgentSend = useCallback(async () => {
-    if (!token) {
-      showToast("error", "Vui lòng đăng nhập để sử dụng agent.");
-      setAuthVisible(true);
-      return;
-    }
-    const message = agentInput.trim();
-    if (!message || agentLoading) {
-      return;
-    }
-    const userMessage: AgentMessage = { id: generateMessageId(), role: "user", content: message };
-    const conversation = [...agentMessages, userMessage];
-    setAgentMessages(conversation);
-    setAgentInput("");
-    setAgentLoading(true);
-    try {
-      const { data } = await axios.post<AgentChatResponse>(`${API_BASE_URL}/api/agent/chat`, {
-        messages: conversation.map(({ role, content }) => ({ role, content })),
-        session_id: agentSessionId,
-      });
-      setAgentSessionId(data.session_id);
-      setAgentSessionTitle(data.session_title);
-      setAgentMessages((prev) => [
-        ...prev,
-        { id: generateMessageId(), role: "assistant", content: data.reply },
-      ]);
-      await fetchAgentSessions();
-      if (data.finished && data.description) {
-        const evaluation =
-          typeof data.seo_score === "number" && Array.isArray(data.seo_factors)
-            ? { score: data.seo_score, factors: data.seo_factors }
-            : evaluateSeo(data.description);
-        const historyId = data.history_id ?? `agent-${Date.now()}`;
-        const timestamp = data.timestamp ?? new Date().toISOString();
-        const style = data.style ?? "Marketing";
-        const source = data.source ?? "agent";
-        setResult({
-          description: data.description,
-          seo_score: evaluation.score,
-          seo_factors: evaluation.factors,
-          history_id: historyId,
-          timestamp,
-          style,
-          source,
-          image_url: data.image_url ?? null,
-        });
-        setSeoFactors(evaluation.factors);
-        await refreshHistory();
-      }
-    } catch (err: any) {
-      if (handleUnauthorized(err)) {
-        return;
-      }
-      const detail = err?.response?.data?.detail ?? "Agent gặp lỗi, vui lòng thử lại.";
-      setAgentMessages((prev) => [
-        ...prev,
-        { id: generateMessageId(), role: "assistant", content: detail },
-      ]);
-      showToast("error", detail);
-    } finally {
-      setAgentLoading(false);
-    }
-  }, [
-    agentInput,
-    agentLoading,
-    agentMessages,
-    agentSessionId,
-    generateMessageId,
-    handleUnauthorized,
-    refreshHistory,
-    fetchAgentSessions,
-    setAuthVisible,
-    showToast,
-    token,
-  ]);
 
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -870,8 +656,6 @@ export default function HomePage() {
     setUser(null);
     setHistory([]);
     setResult(null);
-    setAgentSessions([]);
-    resetAgentConversation();
     stopCamera();
     showToast("success", "Đã đăng xuất");
   };
@@ -966,12 +750,7 @@ export default function HomePage() {
             >
               📚 Thư viện mẫu
             </button>
-            <button
-              className={`tab-button ${activeTab === "agent" ? "active" : ""}`}
-              onClick={() => setActiveTab("agent")}
-            >
-              🤖 Agent AI
-            </button>
+            
           </div>
         </div>
 
@@ -1149,6 +928,11 @@ export default function HomePage() {
                       {downloadState === "pdf" ? "Đang tạo PDF..." : "📕 Tải PDF"}
                     </button>
                   </div>
+                  {!isAuthenticated && (
+                    <p style={{ marginTop: 16, color: "var(--accent-orange)", fontWeight: 600 }}>
+                      Lưu ý: Chỉ khi bạn đăng nhập hoặc đăng ký tài khoản thì lịch sử mô tả mới được lưu lại.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1217,6 +1001,11 @@ export default function HomePage() {
                     {downloadState === "pdf" ? "Đang tạo PDF..." : "📕 Tải PDF"}
                   </button>
                 </div>
+                {!isAuthenticated && (
+                  <p style={{ marginTop: 16, color: "var(--accent-orange)", fontWeight: 600 }}>
+                    Lưu ý: Chỉ người dùng đã đăng nhập/đăng ký mới được lưu lịch sử mô tả.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1254,148 +1043,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {activeTab === "agent" && (
-          <div className="section">
-            <div className="card">
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: 12,
-                  }}
-                >
-                  <h2 style={{ margin: 0 }}>🤖 Trợ lý AI tạo mô tả</h2>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {isAuthenticated && (
-                      <select
-                        value={agentSessionId ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          if (value === "") {
-                            resetAgentConversation();
-                            return;
-                          }
-                          const numericValue = Number(value);
-                          if (!Number.isNaN(numericValue)) {
-                            void loadAgentSession(numericValue);
-                          }
-                        }}
-                        style={{ padding: "8px 12px", borderRadius: 16, border: "1px solid rgba(0,0,0,0.1)" }}
-                      >
-                        <option value="">Phiên mới</option>
-                        {agentSessions.map((sessionItem) => (
-                          <option key={sessionItem.id} value={sessionItem.id}>
-                            {sessionItem.title}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    <button className="secondary-button" onClick={resetAgentConversation} disabled={agentLoading}>
-                      Tạo phiên mới
-                    </button>
-                  </div>
-                </div>
-                <p style={{ color: "var(--text-secondary)", margin: 0 }}>
-                  Đặt mục tiêu cho agent, ví dụ: &ldquo;Tạo mô tả sang trọng cho hộp quà táo nhập khẩu&rdquo;.
-                </p>
-                {!isAuthenticated && (
-                  <p style={{ color: "var(--accent-orange)", fontWeight: 600, margin: 0 }}>
-                    Bạn cần đăng nhập để sử dụng agent và lưu lịch sử mô tả.
-                  </p>
-                )}
-                {agentSessionTitle && (
-                  <p style={{ color: "var(--text-secondary)", margin: 0 }}>
-                    Phiên hiện tại: {agentSessionTitle}
-                  </p>
-                )}
-              </div>
-              <div
-                style={{
-                  marginTop: 20,
-                  padding: 16,
-                  background: "#f7f9fc",
-                  borderRadius: 20,
-                  maxHeight: 320,
-                  overflowY: "auto",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                }}
-              >
-                {agentMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    style={{
-                      display: "flex",
-                      justifyContent: message.role === "user" ? "flex-end" : "flex-start",
-                    }}
-                  >
-                    <div
-                      style={{
-                        maxWidth: "82%",
-                        background:
-                          message.role === "user" ? "var(--accent-orange)" : "rgba(255, 255, 255, 0.9)",
-                        color: message.role === "user" ? "#fff" : "var(--text-primary)",
-                        padding: "12px 16px",
-                        borderRadius:
-                          message.role === "user"
-                            ? "18px 18px 6px 18px"
-                            : "18px 18px 18px 6px",
-                        boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
-                        whiteSpace: "pre-line",
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      {message.content}
-                    </div>
-                  </div>
-                ))}
-                {agentLoading && (
-                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                    <div
-                      style={{
-                        background: "rgba(255,255,255,0.9)",
-                        padding: "10px 14px",
-                        borderRadius: "18px 18px 18px 6px",
-                        boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      Agent đang suy nghĩ...
-                    </div>
-                  </div>
-                )}
-              </div>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void handleAgentSend();
-                }}
-                style={{ display: "flex", gap: 12, marginTop: 20 }}
-              >
-                <textarea
-                  rows={2}
-                  placeholder="Mô tả nhanh nhu cầu của bạn..."
-                  value={agentInput}
-                  onChange={(event) => setAgentInput(event.target.value)}
-                  style={{ flex: 1, resize: "none" }}
-                  disabled={agentLoading}
-                />
-                <button
-                  type="submit"
-                  className="primary-button"
-                  style={{ minWidth: 120, alignSelf: "stretch" }}
-                  disabled={agentLoading || !agentInput.trim()}
-                >
-                  {agentLoading ? "Đang xử lý..." : "Gửi"}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
 
         <div className="section">
           <h2>📜 Lịch sử mô tả</h2>
