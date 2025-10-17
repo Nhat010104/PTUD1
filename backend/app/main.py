@@ -205,13 +205,8 @@ def get_current_user_optional(
 @app.post("/api/descriptions/image", response_model=DescriptionResponse)
 async def generate_description_from_image(
     file: UploadFile = File(...),
-<<<<<<< HEAD
     style: str = Form("Tiếp thị"),
-    current_user: User = Depends(get_current_user),
-=======
-    style: str = Form("Marketing"),
     current_user: Optional[User] = Depends(get_current_user_optional),
->>>>>>> bb1dac26d1b89f4daaea9f6fc6dca048a0b69ef1
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
     settings = get_settings()
@@ -304,11 +299,6 @@ async def generate_description_from_text(
     )
 
 
-<<<<<<< HEAD
-=======
-
-
->>>>>>> bb1dac26d1b89f4daaea9f6fc6dca048a0b69ef1
 @app.get("/api/history", response_model=list[HistoryItem])
 def get_history(
     limit: int = 20,

@@ -391,11 +391,6 @@ export default function HomePage() {
   };
 
   const handleImageSubmit = async () => {
-    if (!token) {
-      showToast("error", "Vui lòng đăng nhập để sử dụng chức năng này.");
-      setAuthVisible(true);
-      return;
-    }
     const imageToSubmit = activeImage;
     if (!imageToSubmit) {
       showToast("error", "Vui lòng thêm ít nhất một hình ảnh hợp lệ.");
@@ -416,8 +411,12 @@ export default function HomePage() {
 
       setResult(data);
       setSeoFactors(data.seo_factors);
-      await refreshHistory();
-      showToast("success", "Đã tạo mô tả từ hình ảnh");
+      if (token) {
+        await refreshHistory();
+        showToast("success", "Đã tạo mô tả từ hình ảnh và lưu vào lịch sử");
+      } else {
+        showToast("success", "Đã tạo mô tả từ hình ảnh. Đăng nhập để lưu lịch sử!");
+      }
     } catch (err: any) {
       if (handleUnauthorized(err)) {
         return;
@@ -430,11 +429,6 @@ export default function HomePage() {
   };
 
   const handleTextSubmit = async () => {
-    if (!token) {
-      showToast("error", "Vui lòng đăng nhập để sử dụng chức năng này.");
-      setAuthVisible(true);
-      return;
-    }
     if (!productInfo.trim()) {
       showToast("error", "Vui lòng nhập thông tin sản phẩm");
       return;
@@ -448,8 +442,12 @@ export default function HomePage() {
       });
       setResult(data);
       setSeoFactors(data.seo_factors);
-      await refreshHistory();
-      showToast("success", "Đã tạo mô tả từ văn bản");
+      if (token) {
+        await refreshHistory();
+        showToast("success", "Đã tạo mô tả từ văn bản và lưu vào lịch sử");
+      } else {
+        showToast("success", "Đã tạo mô tả từ văn bản. Đăng nhập để lưu lịch sử!");
+      }
     } catch (err: any) {
       if (handleUnauthorized(err)) {
         return;
@@ -929,9 +927,20 @@ export default function HomePage() {
         <div className="section">
           <h2>📜 Lịch sử mô tả</h2>
           {!isAuthenticated ? (
-            <p style={{ color: "var(--text-secondary)" }}>
-              Đăng nhập để xem và lưu lịch sử mô tả của bạn.
-            </p>
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+                🔒 Đăng nhập để xem và lưu lịch sử mô tả của bạn
+              </p>
+              <button
+                className="primary-button"
+                onClick={() => {
+                  setAuthVisible(true);
+                  setAuthMode("login");
+                }}
+              >
+                Đăng nhập ngay
+              </button>
+            </div>
           ) : history.length === 0 ? (
             <p style={{ color: "var(--text-secondary)" }}>Chưa có lịch sử.</p>
           ) : (
