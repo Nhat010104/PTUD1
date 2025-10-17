@@ -8,19 +8,19 @@ from .gemini import get_model
 
 
 STYLE_PROMPTS = {
-    "Marketing": """
+    "Tiếp thị": """
         Viết theo phong cách MARKETING mạnh mẽ, gợi cảm xúc, kích thích mua hàng.
         Sử dụng từ ngữ hấp dẫn, tạo cảm giác KHAN HIẾM và GIÁ TRỊ CAO.
     """,
-    "Professional": """
+    "Chuyên nghiệp": """
         Viết theo phong cách CHUYÊN NGHIỆP, trang trọng, chính xác.
         Tập trung vào thông tin chi tiết, nguồn gốc, chất lượng sản phẩm.
     """,
-    "Casual": """
+    "Thân thiện": """
         Viết theo phong cách THÂN THIỆN, gần gũi, dễ hiểu.
         Như đang tư vấn cho bạn bè, tự nhiên và chân thực.
     """,
-    "Storytelling": """
+    "Kể chuyện": """
         Viết theo phong cách KỂ CHUYỆN, tạo câu chuyện hấp dẫn về sản phẩm.
         Mở đầu bằng câu chuyện, lồng ghép thông tin sản phẩm vào câu chuyện.
     """,
@@ -29,7 +29,7 @@ STYLE_PROMPTS = {
 
 def get_style_prompt(style: str) -> str:
     """Return the Gemini writing style prompt."""
-    return STYLE_PROMPTS.get(style, STYLE_PROMPTS["Marketing"])
+    return STYLE_PROMPTS.get(style, STYLE_PROMPTS["Tiếp thị"])
 
 
 def _image_prompt(style: str) -> str:

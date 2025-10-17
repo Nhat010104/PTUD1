@@ -1,13 +1,13 @@
 """Pydantic models for request and response payloads."""
 
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class GenerateTextRequest(BaseModel):
     product_info: str = Field(..., min_length=3)
-    style: str = Field(default="Marketing")
+    style: str = Field(default="Tiếp thị")
 
 
 class DescriptionResponse(BaseModel):
@@ -29,44 +29,6 @@ class HistoryItem(BaseModel):
     summary: str
     full_description: str
     image_url: Optional[str]
-
-
-class AgentMessagePayload(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
-
-
-class AgentRequest(BaseModel):
-    messages: List[AgentMessagePayload]
-    session_id: Optional[int] = None
-
-
-class AgentResponsePayload(BaseModel):
-    reply: str
-    finished: bool
-    description: Optional[str]
-    seo_score: Optional[int]
-    seo_factors: Optional[List[str]]
-    history_id: Optional[str]
-    timestamp: Optional[str]
-    style: Optional[str]
-    source: Optional[str]
-    image_url: Optional[str]
-    session_id: int
-    session_title: str
-
-
-class AgentSessionSummary(BaseModel):
-    id: int
-    title: str
-    updated_at: str
-
-
-class AgentSessionDetail(BaseModel):
-    id: int
-    title: str
-    updated_at: str
-    messages: List[AgentMessagePayload]
 
 
 class ExportRequest(BaseModel):

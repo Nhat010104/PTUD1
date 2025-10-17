@@ -14,8 +14,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 
 from .config import get_settings
-from .db.models import AgentMessage as AgentMessageModel
-from .db.models import AgentSession as AgentSessionModel
 from .db.models import Description, PasswordResetToken, User
 from .db.session import engine, get_session, init_db
 from .schemas import (
@@ -23,11 +21,6 @@ from .schemas import (
     ExportRequest,
     GenerateTextRequest,
     HistoryItem,
-    AgentRequest,
-    AgentMessagePayload,
-    AgentResponsePayload,
-    AgentSessionDetail,
-    AgentSessionSummary,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     MessageResponse,
@@ -36,8 +29,7 @@ from .schemas import (
     UserCreate,
     UserOut,
 )
-from .services import agent as agent_service
-from .services import auth, content, exporters, history as history_service, seo, templates
+from .services import auth, content, exporters, history as history_service, seo
 from sqlmodel import Session, select
 
 
@@ -199,7 +191,7 @@ def me(current_user: User = Depends(get_current_user)) -> UserOut:
 @app.post("/api/descriptions/image", response_model=DescriptionResponse)
 async def generate_description_from_image(
     file: UploadFile = File(...),
-    style: str = Form("Marketing"),
+    style: str = Form("Tiếp thị"),
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
@@ -288,140 +280,6 @@ async def generate_description_from_text(
     )
 
 
-@app.post("/api/agent/chat", response_model=AgentResponsePayload)
-def agent_chat(
-    payload: AgentRequest,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> AgentResponsePayload:
-    settings = get_settings()
-
-    if not payload.messages:
-        raise HTTPException(status_code=400, detail="Thiếu hội thoại đầu vào")
-
-    latest_message = payload.messages[-1]
-    if latest_message.role != "user":
-        raise HTTPException(status_code=400, detail="Tin nhắn cuối phải thuộc về người dùng")
-
-    agent_session: Optional[AgentSessionModel] = None
-    if payload.session_id is not None:
-        agent_session = session.get(AgentSessionModel, payload.session_id)
-        if not agent_session or agent_session.user_id != current_user.id:
-            raise HTTPException(status_code=404, detail="Không tìm thấy phiên agent")
-    else:
-        title = agent_service.generate_session_title(latest_message.content)
-        agent_session = AgentSessionModel(user_id=current_user.id, title=title)
-        session.add(agent_session)
-        session.commit()
-        session.refresh(agent_session)
-
-    stored_messages = session.exec(
-        select(AgentMessageModel)
-        .where(AgentMessageModel.session_id == agent_session.id)
-        .order_by(AgentMessageModel.created_at.asc())
-    ).all()
-
-    conversation = [
-        agent_service.AgentMessage(role=message.role, content=message.content)
-        for message in stored_messages
-    ]
-    conversation.append(agent_service.AgentMessage(role=latest_message.role, content=latest_message.content))
-
-    result = agent_service.run_agent(settings.gemini_api_key, conversation)
-
-    session.add(
-        AgentMessageModel(session_id=agent_session.id, role="user", content=latest_message.content)
-    )
-    session.add(
-        AgentMessageModel(session_id=agent_session.id, role="assistant", content=result.reply)
-    )
-
-    agent_session.updated_at = datetime.utcnow()
-
-    history_id = None
-    timestamp = None
-    image_url = None
-    source = "agent"
-
-    if result.finished and result.description:
-        db_entry = Description(
-            user_id=current_user.id,
-            source=source,
-            style=result.style or "Marketing",
-            content=result.description,
-            image_path=None,
-        )
-        session.add(db_entry)
-        session.commit()
-        session.refresh(db_entry)
-        entry = history_service.history_item_from_db(db_entry)
-        history_id = entry["id"]
-        timestamp = entry["timestamp"]
-        image_url = entry.get("image_url")
-
-    session.commit()
-
-    return AgentResponsePayload(
-        reply=result.reply,
-        finished=result.finished,
-        description=result.description,
-        seo_score=result.seo_score,
-        seo_factors=result.seo_factors,
-        history_id=history_id,
-        timestamp=timestamp,
-        style=result.style,
-        source=source if result.finished else None,
-        image_url=image_url,
-        session_id=agent_session.id,
-        session_title=agent_session.title,
-    )
-
-
-@app.get("/api/agent/sessions", response_model=list[AgentSessionSummary])
-def list_agent_sessions(
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> list[AgentSessionSummary]:
-    sessions = session.exec(
-        select(AgentSessionModel)
-        .where(AgentSessionModel.user_id == current_user.id)
-        .order_by(AgentSessionModel.updated_at.desc())
-    ).all()
-    return [
-        AgentSessionSummary(id=item.id, title=item.title, updated_at=item.updated_at.isoformat())
-        for item in sessions
-    ]
-
-
-@app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetail)
-def get_agent_session(
-    session_id: int,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> AgentSessionDetail:
-    agent_session = session.get(AgentSessionModel, session_id)
-    if not agent_session or agent_session.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Không tìm thấy phiên agent")
-
-    messages = session.exec(
-        select(AgentMessageModel)
-        .where(AgentMessageModel.session_id == session_id)
-        .order_by(AgentMessageModel.created_at.asc())
-    ).all()
-
-    payload = [
-        AgentMessagePayload(role=message.role, content=message.content)
-        for message in messages
-    ]
-
-    return AgentSessionDetail(
-        id=agent_session.id,
-        title=agent_session.title,
-        updated_at=agent_session.updated_at.isoformat(),
-        messages=payload,
-    )
-
-
 @app.get("/api/history", response_model=list[HistoryItem])
 def get_history(
     limit: int = 20,
@@ -433,43 +291,10 @@ def get_history(
     return [HistoryItem(**entry) for entry in entries]
 
 
-@app.get("/api/templates")
-def get_templates() -> JSONResponse:
-    """Return the list of predefined templates."""
-    return JSONResponse(templates.TEMPLATES)
-
-
 @app.get("/api/styles")
 def get_styles() -> JSONResponse:
     """Return supported writing styles."""
     return JSONResponse(sorted(content.STYLE_PROMPTS.keys()))
 
 
-@app.post("/api/export/docx")
-def download_docx(payload: ExportRequest) -> StreamingResponse:
-    if not payload.description.strip():
-        raise HTTPException(status_code=400, detail="Nội dung mô tả không được để trống")
-    buffer = exporters.export_docx(payload.description)
-    headers = {
-        "Content-Disposition": "attachment; filename=description.docx"
-    }
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=headers,
-    )
 
-
-@app.post("/api/export/pdf")
-def download_pdf(payload: ExportRequest) -> StreamingResponse:
-    if not payload.description.strip():
-        raise HTTPException(status_code=400, detail="Nội dung mô tả không được để trống")
-    buffer = exporters.export_pdf(payload.description)
-    headers = {
-        "Content-Disposition": "attachment; filename=description.pdf"
-    }
-    return StreamingResponse(
-        buffer,
-        media_type="application/pdf",
-        headers=headers,
-    )
