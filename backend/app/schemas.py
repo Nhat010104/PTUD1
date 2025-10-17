@@ -31,10 +31,6 @@ class HistoryItem(BaseModel):
     image_url: Optional[str]
 
 
-class ExportRequest(BaseModel):
-    description: str
-
-
 class UserCreate(BaseModel):
     email: str
     password: str = Field(min_length=6)

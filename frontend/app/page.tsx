@@ -8,7 +8,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 
 type TabKey = "image" | "text";
 type AuthMode = "login" | "register" | "forgot" | "reset";
-type DownloadKind = "docx" | "pdf";
 
 interface DescriptionResponse {
   description: string;
@@ -154,7 +153,6 @@ export default function HomePage() {
   const [result, setResult] = useState<DescriptionResponse | null>(null);
   const [seoFactors, setSeoFactors] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [downloadState, setDownloadState] = useState<DownloadKind | null>(null);
 
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -463,43 +461,7 @@ export default function HomePage() {
     }
   };
 
-  const handleDownload = async (endpoint: DownloadKind, filename: string) => {
-    if (!token || !result) {
-      showToast("error", "Vui lòng đăng nhập và tạo mô tả trước khi tải xuống.");
-      return;
-    }
-    setDownloadState(endpoint);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/export/${endpoint}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ description: result.description }),
-      });
-      if (!response.ok) {
-        throw new Error("Không thể tải xuống tệp");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      if (handleUnauthorized(err)) {
-        return;
-      }
-      const message = err?.message ?? "Không thể tải xuống tệp";
-      showToast("error", message);
-    } finally {
-      setDownloadState(null);
-    }
-  };
+
 
 
 
@@ -902,20 +864,6 @@ export default function HomePage() {
                     >
                        Sao chép
                     </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => handleDownload("docx", `description-${result.history_id}.docx`)}
-                      disabled={downloadState === "docx"}
-                    >
-                      {downloadState === "docx" ? "Đang tạo DOCX..." : " Tải DOCX"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => handleDownload("pdf", `description-${result.history_id}.pdf`)}
-                      disabled={downloadState === "pdf"}
-                    >
-                      {downloadState === "pdf" ? "Đang tạo PDF..." : " Tải PDF"}
-                    </button>
                   </div>
                 </div>
               )}
@@ -969,20 +917,6 @@ export default function HomePage() {
                     onClick={() => navigator.clipboard.writeText(result.description)}
                   >
                      Sao chép
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => handleDownload("docx", `description-${result.history_id}.docx`)}
-                    disabled={downloadState === "docx"}
-                  >
-                    {downloadState === "docx" ? "Đang tạo DOCX..." : " Tải DOCX"}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => handleDownload("pdf", `description-${result.history_id}.pdf`)}
-                    disabled={downloadState === "pdf"}
-                  >
-                    {downloadState === "pdf" ? "Đang tạo PDF..." : " Tải PDF"}
                   </button>
                 </div>
               </div>
@@ -1181,20 +1115,6 @@ export default function HomePage() {
                 onClick={() => navigator.clipboard.writeText(historyDetail.full_description)}
               >
                 📋 Sao chép
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() => handleDownload("docx", `description-${historyDetail.id}.docx`)}
-                disabled={downloadState === "docx"}
-              >
-                {downloadState === "docx" ? "Đang tạo DOCX..." : "📝 Tải DOCX"}
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() => handleDownload("pdf", `description-${historyDetail.id}.pdf`)}
-                disabled={downloadState === "pdf"}
-              >
-                {downloadState === "pdf" ? "Đang tạo PDF..." : "📕 Tải PDF"}
               </button>
             </div>
           </div>

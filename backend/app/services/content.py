@@ -43,38 +43,19 @@ def _image_prompt(style: str) -> str:
     ✅ Tích hợp từ khóa SEO tự nhiên
     ✅ Storytelling (kể chuyện về sản phẩm)
 
-    **🎯 TIÊU ĐỀ SẢN PHẨM (Tối ưu SEO):**
-    [Viết tiêu đề BẮT MẮT 60-80 ký tự, có từ khóa chính + từ khóa phụ]
-
-    **✨ SLOGAN HẤP DẪN:**
-    [1 câu slogan ngắn gọn, ấn tượng, dễ nhớ]
-
-    **📝 MÔ TẢ CHI TIẾT (100-150 từ):**
-    Viết đoạn văn sinh động, hấp dẫn với:
-    - Mở đầu bằng câu hook thu hút
-    - Miêu tả cảm giác khi thưởng thức
-    - Nguồn gốc xuất xứ rõ ràng
-    - Lợi ích CỤ THỂ cho khách hàng
-    - Kết thúc bằng call-to-action
-
-    **💎 5 ĐIỂM NỔI BẬT:**
-    - ✅ [Điểm 1: Chất lượng cao cấp]
-    - ✅ [Điểm 2: Nguồn gốc/xuất xứ]
-    - ✅ [Điểm 3: Hương vị đặc biệt]
-    - ✅ [Điểm 4: Giá trị dinh dưỡng]
-    - ✅ [Điểm 5: Độ tươi/cam kết]
-
-    **🌟 LỢI ÍCH VƯỢT TRỘI:**
-    [3-4 lợi ích CỤ THỂ, dùng số liệu nếu có]
-
-    **🎁 CAM KẾT & ƯU ĐÃI:**
-    [Các cam kết về chất lượng, đổi trả, giao hàng]
-
-    **🍽️ GỢI Ý THƯỞNG THỨC:**
-    [2-3 cách sử dụng sáng tạo]
-
-    **#️⃣ TỪ KHÓA SEO:**
-    [5-7 hashtag và từ khóa liên quan]
+    HÃY TRẢ KẾT QUẢ THEO ĐỊNH DẠNG SAU (KHÔNG DÙNG KÝ TỰ * HOẶC -):
+    Tiêu đề sản phẩm: [viết tiêu đề bắt mắt 60-80 ký tự, có từ khóa chính và phụ]
+    Slogan: [1 câu slogan ngắn gọn, ấn tượng, dễ nhớ]
+    Mô tả chi tiết: [đoạn văn 100-150 từ, mở đầu bằng câu hook, miêu tả cảm giác khi thưởng thức, nêu nguồn gốc, lợi ích cụ thể và call-to-action]
+    Điểm nổi bật 1: [chất lượng cao cấp]
+    Điểm nổi bật 2: [nguồn gốc/xuất xứ]
+    Điểm nổi bật 3: [hương vị đặc biệt]
+    Điểm nổi bật 4: [giá trị dinh dưỡng]
+    Điểm nổi bật 5: [độ tươi hoặc cam kết]
+    Lợi ích vượt trội: [3 đến 4 lợi ích cụ thể, dùng số liệu nếu có]
+    Cam kết và ưu đãi: [các cam kết về chất lượng, đổi trả, giao hàng]
+    Gợi ý thưởng thức: [2 đến 3 cách sử dụng sáng tạo]
+    Từ khóa SEO: [5 đến 7 hashtag hoặc từ khóa liên quan, viết cách nhau bằng dấu phẩy]
 
     Viết bằng TIẾNG VIỆT tự nhiên, thân thiện.
     """
@@ -87,7 +68,21 @@ def _text_prompt(product_info: str, style: str) -> str:
 
     {get_style_prompt(style)}
 
-    [Cấu trúc giống như trong yêu cầu phân tích hình ảnh]
+    HÃY TRẢ KẾT QUẢ THEO ĐỊNH DẠNG SAU (KHÔNG DÙNG KÝ TỰ * HOẶC -):
+    Tiêu đề sản phẩm: ...
+    Slogan: ...
+    Mô tả chi tiết: ...
+    Điểm nổi bật 1: ...
+    Điểm nổi bật 2: ...
+    Điểm nổi bật 3: ...
+    Điểm nổi bật 4: ...
+    Điểm nổi bật 5: ...
+    Lợi ích vượt trội: ...
+    Cam kết và ưu đãi: ...
+    Gợi ý thưởng thức: ...
+    Từ khóa SEO: ...
+
+    Viết bằng TIẾNG VIỆT tự nhiên, thân thiện.
     """
 
 

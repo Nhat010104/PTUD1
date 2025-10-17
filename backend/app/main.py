@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
 
 from .config import get_settings
@@ -18,7 +18,6 @@ from .db.models import Description, PasswordResetToken, User
 from .db.session import engine, get_session, init_db
 from .schemas import (
     DescriptionResponse,
-    ExportRequest,
     GenerateTextRequest,
     HistoryItem,
     ForgotPasswordRequest,
@@ -29,7 +28,7 @@ from .schemas import (
     UserCreate,
     UserOut,
 )
-from .services import auth, content, exporters, history as history_service, seo
+from .services import auth, content, history as history_service, seo
 from sqlmodel import Session, select
 
 
@@ -73,9 +72,11 @@ def seed_admin_user() -> None:
 
 
 def get_current_user(
-    token: str = Depends(auth.oauth2_scheme),
+    token: str = Depends(auth.optional_oauth2_scheme),
     session: Session = Depends(get_session),
 ) -> User:
+    if not token:
+        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập")
     email = auth.decode_access_token(token)
     if not email:
         raise HTTPException(status_code=401, detail="Token không hợp lệ")
@@ -188,11 +189,29 @@ def me(current_user: User = Depends(get_current_user)) -> UserOut:
     return UserOut(id=current_user.id, email=current_user.email, created_at=current_user.created_at.isoformat())
 
 
+def get_current_user_optional(
+    token: Optional[str] = Depends(auth.optional_oauth2_scheme),
+    session: Session = Depends(get_session),
+) -> Optional[User]:
+    if not token:
+        return None
+    email = auth.decode_access_token(token)
+    if not email:
+        return None
+    user = session.exec(select(User).where(User.email == email)).first()
+    return user
+
+
 @app.post("/api/descriptions/image", response_model=DescriptionResponse)
 async def generate_description_from_image(
     file: UploadFile = File(...),
+<<<<<<< HEAD
     style: str = Form("Tiếp thị"),
     current_user: User = Depends(get_current_user),
+=======
+    style: str = Form("Marketing"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+>>>>>>> bb1dac26d1b89f4daaea9f6fc6dca048a0b69ef1
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
     settings = get_settings()
@@ -206,7 +225,7 @@ async def generate_description_from_image(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".jpg", ".jpeg", ".png"}:
         suffix = ".jpg"
-    filename = f"{current_user.id}_{uuid4().hex}{suffix}"
+    filename = f"{uuid4().hex}{suffix}"
     relative_image_path = Path("images") / filename
     image_path: Optional[Path] = None
     try:
@@ -226,33 +245,35 @@ async def generate_description_from_image(
 
     score, factors = seo.calculate_seo_score(description)
     db_entry = Description(
-        user_id=current_user.id,
+        user_id=current_user.id if current_user else None,
         source="image",
         style=style,
         content=description,
         image_path=relative_image_path.as_posix() if image_path else None,
     )
-    session.add(db_entry)
-    session.commit()
-    session.refresh(db_entry)
-    entry = history_service.history_item_from_db(db_entry)
+    history_payload = None
+    if current_user:
+        session.add(db_entry)
+        session.commit()
+        session.refresh(db_entry)
+        history_payload = history_service.history_item_from_db(db_entry)
 
     return DescriptionResponse(
         description=description,
         seo_score=score,
         seo_factors=factors,
-        history_id=entry["id"],
-        timestamp=entry["timestamp"],
-        style=entry["style"],
-        source=entry["source"],
-        image_url=entry.get("image_url"),
+        history_id=history_payload["id"] if history_payload else "",
+        timestamp=history_payload["timestamp"] if history_payload else datetime.utcnow().isoformat(),
+        style=style,
+        source="image",
+        image_url=history_payload.get("image_url") if history_payload else None,
     )
 
 
 @app.post("/api/descriptions/text", response_model=DescriptionResponse)
 async def generate_description_from_text(
     payload: GenerateTextRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
     settings = get_settings()
@@ -262,24 +283,32 @@ async def generate_description_from_text(
         raise HTTPException(status_code=502, detail="Không tạo được mô tả từ văn bản")
 
     score, factors = seo.calculate_seo_score(description)
-    db_entry = Description(user_id=current_user.id, source="text", style=payload.style, content=description)
-    session.add(db_entry)
-    session.commit()
-    session.refresh(db_entry)
-    entry = history_service.history_item_from_db(db_entry)
+    db_entry = Description(user_id=current_user.id if current_user else None, source="text", style=payload.style, content=description)
+
+    history_payload = None
+    if current_user:
+        session.add(db_entry)
+        session.commit()
+        session.refresh(db_entry)
+        history_payload = history_service.history_item_from_db(db_entry)
 
     return DescriptionResponse(
         description=description,
         seo_score=score,
         seo_factors=factors,
-        history_id=entry["id"],
-        timestamp=entry["timestamp"],
-        style=entry["style"],
-        source=entry["source"],
-        image_url=entry.get("image_url"),
+        history_id=history_payload["id"] if history_payload else "",
+        timestamp=history_payload["timestamp"] if history_payload else datetime.utcnow().isoformat(),
+        style=payload.style,
+        source="text",
+        image_url=history_payload.get("image_url") if history_payload else None,
     )
 
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> bb1dac26d1b89f4daaea9f6fc6dca048a0b69ef1
 @app.get("/api/history", response_model=list[HistoryItem])
 def get_history(
     limit: int = 20,
