@@ -32,7 +32,7 @@ class HistoryItem(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: str
+    identifier: str  # Email hoặc số điện thoại
     password: str = Field(min_length=6)
 
 
@@ -43,12 +43,13 @@ class TokenResponse(BaseModel):
 
 class UserOut(BaseModel):
     id: int
-    email: str
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
     created_at: str
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: str
+    identifier: str  # Email hoặc số điện thoại
 
 
 class ForgotPasswordResponse(BaseModel):
@@ -57,7 +58,7 @@ class ForgotPasswordResponse(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    email: str
+    identifier: str  # Email hoặc số điện thoại
     token: str
     new_password: str = Field(min_length=6)
 

@@ -1,5 +1,6 @@
 """FastAPI application entrypoint."""
 
+import re
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -30,6 +31,18 @@ from .schemas import (
 )
 from .services import auth, content, history as history_service, seo
 from sqlmodel import Session, select
+
+
+def is_email(identifier: str) -> bool:
+    """Kiểm tra xem identifier có phải là email không."""
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(email_pattern, identifier))
+
+
+def is_phone_number(identifier: str) -> bool:
+    """Kiểm tra xem identifier có phải là số điện thoại không."""
+    phone_pattern = r'^[0-9]{10,11}$'
+    return bool(re.match(phone_pattern, identifier))
 
 
 app = FastAPI(title="AI Product Description Service")
@@ -66,7 +79,7 @@ def seed_admin_user() -> None:
         email = "admin@example.com"
         existing = session.exec(select(User).where(User.email == email)).first()
         if not existing:
-            admin = User(email=email, hashed_password=auth.hash_password("123456"))
+            admin = User(email=email, phone_number=None, hashed_password=auth.hash_password("123456"))
             session.add(admin)
             session.commit()
 
@@ -77,10 +90,17 @@ def get_current_user(
 ) -> User:
     if not token:
         raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập")
-    email = auth.decode_access_token(token)
-    if not email:
+    identifier = auth.decode_access_token(token)
+    if not identifier:
         raise HTTPException(status_code=401, detail="Token không hợp lệ")
-    user = session.exec(select(User).where(User.email == email)).first()
+    
+    # Tìm user bằng email hoặc số điện thoại
+    user = None
+    if is_email(identifier):
+        user = session.exec(select(User).where(User.email == identifier)).first()
+    elif is_phone_number(identifier):
+        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    
     if not user:
         raise HTTPException(status_code=401, detail="Không tìm thấy người dùng")
     return user
@@ -88,25 +108,50 @@ def get_current_user(
 
 @app.post("/auth/register", response_model=TokenResponse)
 def register(payload: UserCreate, session: Session = Depends(get_session)) -> TokenResponse:
-    email = payload.email.strip().lower()
-    existing = session.exec(select(User).where(User.email == email)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email đã tồn tại")
-    user = User(email=email, hashed_password=auth.hash_password(payload.password))
+    identifier = payload.identifier.strip()
+    
+    # Xác định loại identifier
+    if is_email(identifier):
+        email = identifier.lower()
+        phone_number = None
+        existing = session.exec(select(User).where(User.email == email)).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email đã tồn tại")
+    elif is_phone_number(identifier):
+        email = None
+        phone_number = identifier
+        existing = session.exec(select(User).where(User.phone_number == phone_number)).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Số điện thoại đã tồn tại")
+    else:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập email hoặc số điện thoại hợp lệ")
+    
+    user = User(email=email, phone_number=phone_number, hashed_password=auth.hash_password(payload.password))
     session.add(user)
     session.commit()
     session.refresh(user)
-    token = auth.create_access_token(user.email)
+    
+    token_subject = email if email else phone_number
+    token = auth.create_access_token(token_subject)
     return TokenResponse(access_token=token)
 
 
 @app.post("/auth/login", response_model=TokenResponse)
 def login(payload: UserCreate, session: Session = Depends(get_session)) -> TokenResponse:
-    email = payload.email.strip().lower()
-    user = session.exec(select(User).where(User.email == email)).first()
+    identifier = payload.identifier.strip()
+    
+    # Tìm user bằng email hoặc số điện thoại
+    user = None
+    if is_email(identifier):
+        user = session.exec(select(User).where(User.email == identifier.lower())).first()
+    elif is_phone_number(identifier):
+        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    
     if not user or not auth.verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Thông tin đăng nhập không chính xác")
-    token = auth.create_access_token(user.email)
+    
+    token_subject = user.email if user.email else user.phone_number
+    token = auth.create_access_token(token_subject)
     return TokenResponse(access_token=token)
 
 
@@ -115,11 +160,17 @@ def forgot_password(
     payload: ForgotPasswordRequest,
     session: Session = Depends(get_session),
 ) -> ForgotPasswordResponse:
-    email = payload.email.strip().lower()
-    message = "Nếu email tồn tại, mã đặt lại đã được tạo."
+    identifier = payload.identifier.strip()
+    message = "Nếu tài khoản tồn tại, mã đặt lại đã được tạo."
     reset_token: Optional[str] = None
 
-    user = session.exec(select(User).where(User.email == email)).first()
+    # Tìm user bằng email hoặc số điện thoại
+    user = None
+    if is_email(identifier):
+        user = session.exec(select(User).where(User.email == identifier.lower())).first()
+    elif is_phone_number(identifier):
+        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    
     if not user:
         return ForgotPasswordResponse(message=message, reset_token=reset_token)
 
@@ -151,11 +202,18 @@ def reset_password(
     payload: ResetPasswordRequest,
     session: Session = Depends(get_session),
 ) -> MessageResponse:
-    email = payload.email.strip().lower()
+    identifier = payload.identifier.strip()
     token_value = payload.token.strip()
-    user = session.exec(select(User).where(User.email == email)).first()
+    
+    # Tìm user bằng email hoặc số điện thoại
+    user = None
+    if is_email(identifier):
+        user = session.exec(select(User).where(User.email == identifier.lower())).first()
+    elif is_phone_number(identifier):
+        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    
     if not user:
-        raise HTTPException(status_code=400, detail="Email hoặc mã đặt lại không hợp lệ")
+        raise HTTPException(status_code=400, detail="Tài khoản hoặc mã đặt lại không hợp lệ")
 
     tokens = session.exec(
         select(PasswordResetToken)
@@ -186,7 +244,12 @@ def reset_password(
 
 @app.get("/auth/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut(id=current_user.id, email=current_user.email, created_at=current_user.created_at.isoformat())
+    return UserOut(
+        id=current_user.id,
+        email=current_user.email,
+        phone_number=current_user.phone_number,
+        created_at=current_user.created_at.isoformat()
+    )
 
 
 def get_current_user_optional(
@@ -195,10 +258,17 @@ def get_current_user_optional(
 ) -> Optional[User]:
     if not token:
         return None
-    email = auth.decode_access_token(token)
-    if not email:
+    identifier = auth.decode_access_token(token)
+    if not identifier:
         return None
-    user = session.exec(select(User).where(User.email == email)).first()
+    
+    # Tìm user bằng email hoặc số điện thoại
+    user = None
+    if is_email(identifier):
+        user = session.exec(select(User).where(User.email == identifier)).first()
+    elif is_phone_number(identifier):
+        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    
     return user
 
 

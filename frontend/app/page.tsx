@@ -47,7 +47,8 @@ interface ImageItem {
 
 interface User {
   id: number;
-  email: string;
+  email: string | null;
+  phone_number: string | null;
   created_at: string;
 }
 
@@ -159,9 +160,9 @@ export default function HomePage() {
   const [authVisible, setAuthVisible] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
-  const [authForm, setAuthForm] = useState({ email: "", password: "" });
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [resetForm, setResetForm] = useState({ email: "", token: "", password: "", confirmPassword: "" });
+  const [authForm, setAuthForm] = useState({ identifier: "", password: "" });
+  const [forgotIdentifier, setForgotIdentifier] = useState("");
+  const [resetForm, setResetForm] = useState({ identifier: "", token: "", password: "", confirmPassword: "" });
   const [resetTokenHint, setResetTokenHint] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [authMessage, setAuthMessage] = useState<{ type: ToastKind; message: string } | null>(null);
@@ -472,10 +473,10 @@ export default function HomePage() {
     clearToast();
     setAuthMessage(null);
     try {
-      const email = authForm.email.trim().toLowerCase();
+      const identifier = authForm.identifier.trim();
       const password = authForm.password.trim();
-      if (!email || !password) {
-        const message = "Vui lòng nhập đầy đủ email và mật khẩu hợp lệ.";
+      if (!identifier || !password) {
+        const message = "Vui lòng nhập đầy đủ email/số điện thoại và mật khẩu hợp lệ.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -483,7 +484,7 @@ export default function HomePage() {
       }
       const url = authMode === "login" ? "/auth/login" : "/auth/register";
       const { data } = await axios.post<TokenResponse>(`${API_BASE_URL}${url}`, {
-        email,
+        identifier,
         password,
       });
       const newToken = data.access_token;
@@ -496,14 +497,33 @@ export default function HomePage() {
         type: "success",
         message: authMode === "login" ? "Đăng nhập thành công" : "Đăng ký thành công",
       });
-      setAuthForm({ email: "", password: "" });
+      setAuthForm({ identifier: "", password: "" });
       showToast("success", authMode === "login" ? "Đăng nhập thành công" : "Đăng ký thành công");
       setTimeout(() => {
         setAuthVisible(false);
         setAuthMessage(null);
       }, 1200);
     } catch (err: any) {
-      const detail = err?.response?.data?.detail ?? "Không thể xác thực";
+      let detail = "Không thể xác thực";
+      
+      // Xử lý các loại error response khác nhau
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        
+        // Nếu detail là array (validation errors từ Pydantic)
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } 
+        // Nếu detail là string
+        else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        }
+        // Nếu detail là object
+        else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+      
       setAuthMessage({ type: "error", message: detail });
       showToast("error", detail);
     } finally {
@@ -518,9 +538,9 @@ export default function HomePage() {
     setAuthMessage(null);
     setResetTokenHint(null);
     try {
-      const email = forgotEmail.trim().toLowerCase();
-      if (!email) {
-        const message = "Vui lòng nhập email đã đăng ký.";
+      const identifier = forgotIdentifier.trim();
+      if (!identifier) {
+        const message = "Vui lòng nhập email hoặc số điện thoại đã đăng ký.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -528,18 +548,30 @@ export default function HomePage() {
       }
       const { data } = await axios.post<ForgotPasswordResponse>(
         `${API_BASE_URL}/auth/forgot-password`,
-        { email }
+        { identifier }
       );
       setAuthMessage({ type: "success", message: data.message });
       showToast("success", data.message);
-      setForgotEmail("");
+      setForgotIdentifier("");
       if (data.reset_token) {
         setResetTokenHint(data.reset_token);
-        setResetForm({ email, token: data.reset_token, password: "", confirmPassword: "" });
+        setResetForm({ identifier, token: data.reset_token, password: "", confirmPassword: "" });
         setAuthMode("reset");
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail ?? "Không thể tạo mã đặt lại";
+      let detail = "Không thể tạo mã đặt lại";
+      
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        } else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+      
       setAuthMessage({ type: "error", message: detail });
       showToast("error", detail);
     } finally {
@@ -553,12 +585,12 @@ export default function HomePage() {
     clearToast();
     setAuthMessage(null);
     try {
-      const email = resetForm.email.trim().toLowerCase();
+      const identifier = resetForm.identifier.trim();
       const tokenValue = resetForm.token.trim();
       const password = resetForm.password.trim();
       const confirm = resetForm.confirmPassword.trim();
-      if (!email || !tokenValue || !password) {
-        const message = "Vui lòng nhập đầy đủ email, mã đặt lại và mật khẩu mới.";
+      if (!identifier || !tokenValue || !password) {
+        const message = "Vui lòng nhập đầy đủ email/số điện thoại, mã đặt lại và mật khẩu mới.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -572,18 +604,30 @@ export default function HomePage() {
         return;
       }
       const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/reset-password`, {
-        email,
+        identifier,
         token: tokenValue,
         new_password: password,
       });
       setAuthMessage({ type: "success", message: data.message });
       showToast("success", data.message);
-      setResetForm({ email: "", token: "", password: "", confirmPassword: "" });
+      setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
       setResetTokenHint(null);
       setAuthMode("login");
-      setAuthForm({ email, password: "" });
+      setAuthForm({ identifier, password: "" });
     } catch (err: any) {
-      const detail = err?.response?.data?.detail ?? "Không thể đặt lại mật khẩu";
+      let detail = "Không thể đặt lại mật khẩu";
+      
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        } else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+      
       setAuthMessage({ type: "error", message: detail });
       showToast("error", detail);
     } finally {
@@ -597,10 +641,10 @@ export default function HomePage() {
     setAuthLoading(false);
     if (mode !== "reset") {
       setResetTokenHint(null);
-      setResetForm({ email: "", token: "", password: "", confirmPassword: "" });
+      setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
     }
     if (mode !== "forgot") {
-      setForgotEmail("");
+      setForgotIdentifier("");
     }
   };
 
@@ -649,7 +693,9 @@ export default function HomePage() {
           <div>
             {isAuthenticated ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-                <span style={{ color: "var(--text-secondary)" }}>{user?.email}</span>
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {user?.email || user?.phone_number}
+                </span>
                 <button className="secondary-button" onClick={handleLogout}>
                   Đăng xuất
                 </button>
@@ -659,7 +705,7 @@ export default function HomePage() {
                 className="primary-button"
                 onClick={() => {
                   changeAuthMode("login");
-                  setAuthForm({ email: "", password: "" });
+                  setAuthForm({ identifier: "", password: "" });
                   setAuthVisible(true);
                 }}
               >
@@ -1008,7 +1054,7 @@ export default function HomePage() {
         </div>
 
         <footer style={{ marginTop: 48, textAlign: "center", color: "var(--text-secondary)" }}>
-          <p>💡 Mẹo: thử nhiều phong cách viết và kiểm tra điểm SEO để tối ưu nội dung.</p>
+          <p> Mẹo: thử nhiều phong cách viết và kiểm tra điểm SEO để tối ưu nội dung.</p>
         </footer>
       </div>
 
@@ -1156,8 +1202,45 @@ export default function HomePage() {
               display: "flex",
               flexDirection: "column",
               gap: 16,
+              position: "relative",
             }}
           >
+            <button
+              type="button"
+              onClick={() => {
+                setAuthVisible(false);
+                changeAuthMode("login");
+                setAuthForm({ identifier: "", password: "" });
+                setAuthMessage(null);
+              }}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "rgba(0,0,0,0.08)",
+                color: "var(--text-primary)",
+                border: "none",
+                borderRadius: "50%",
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 20,
+                fontWeight: 600,
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(0,0,0,0.08)";
+              }}
+              aria-label="Đóng"
+            >
+              ✕
+            </button>
             <h2 style={{ margin: 0, textAlign: "center" }}>
               {authMode === "login"
                 ? "Đăng nhập tài khoản"
@@ -1199,15 +1282,15 @@ export default function HomePage() {
             {(authMode === "login" || authMode === "register") && (
               <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
-                  type="email"
-                  placeholder="Email"
-                  value={authForm.email}
-                  onChange={(event) => setAuthForm((prev) => ({ ...prev, email: event.target.value }))}
+                  type="text"
+                  placeholder="Email hoặc Số điện thoại"
+                  value={authForm.identifier}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, identifier: event.target.value }))}
                   required
                 />
                 <input
                   type="password"
-                  placeholder="Mật khẩu (>=6 ký tự)"
+                  placeholder="Mật khẩu"
                   value={authForm.password}
                   onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
                   required
@@ -1221,10 +1304,10 @@ export default function HomePage() {
             {authMode === "forgot" && (
               <form onSubmit={handleForgotSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
-                  type="email"
-                  placeholder="Nhập email đã đăng ký"
-                  value={forgotEmail}
-                  onChange={(event) => setForgotEmail(event.target.value)}
+                  type="text"
+                  placeholder="Nhập email hoặc số điện thoại đã đăng ký"
+                  value={forgotIdentifier}
+                  onChange={(event) => setForgotIdentifier(event.target.value)}
                   required
                 />
                 <button className="primary-button" type="submit" disabled={authLoading}>
@@ -1235,10 +1318,10 @@ export default function HomePage() {
             {authMode === "reset" && (
               <form onSubmit={handleResetSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
-                  type="email"
-                  placeholder="Email"
-                  value={resetForm.email}
-                  onChange={(event) => setResetForm((prev) => ({ ...prev, email: event.target.value }))}
+                  type="text"
+                  placeholder="Email hoặc Số điện thoại"
+                  value={resetForm.identifier}
+                  onChange={(event) => setResetForm((prev) => ({ ...prev, identifier: event.target.value }))}
                   required
                 />
                 <input
@@ -1250,7 +1333,7 @@ export default function HomePage() {
                 />
                 <input
                   type="password"
-                  placeholder="Mật khẩu mới (>=6 ký tự)"
+                  placeholder="Mật khẩu mới"
                   value={resetForm.password}
                   onChange={(event) => setResetForm((prev) => ({ ...prev, password: event.target.value }))}
                   required
@@ -1269,49 +1352,27 @@ export default function HomePage() {
                 </button>
               </form>
             )}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 12,
-              }}
-            >
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {authMode === "login" && (
-                  <>
-                    <button className="secondary-button" type="button" onClick={() => changeAuthMode("register")}>
-                      Chưa có tài khoản? Đăng ký
-                    </button>
-                    <button className="secondary-button" type="button" onClick={() => changeAuthMode("forgot")}>
-                      Quên mật khẩu?
-                    </button>
-                  </>
-                )}
-                {authMode === "register" && (
-                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")}>
-                    Đã có tài khoản? Đăng nhập
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {authMode === "login" && (
+                <>
+                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("register")} style={{ flex: 1 }}>
+                     Đăng ký tài khoản
                   </button>
-                )}
-                {(authMode === "forgot" || authMode === "reset") && (
-                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")}>
-                    Quay lại đăng nhập
+                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("forgot")} style={{ flex: 1 }}>
+                    Quên mật khẩu
                   </button>
-                )}
-              </div>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => {
-                  setAuthVisible(false);
-                  changeAuthMode("login");
-                  setAuthForm({ email: "", password: "" });
-                  setAuthMessage(null);
-                }}
-              >
-                Đóng
-              </button>
+                </>
+              )}
+              {authMode === "register" && (
+                <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")} style={{ width: "100%" }}>
+                  Đã có tài khoản? Đăng nhập
+                </button>
+              )}
+              {(authMode === "forgot" || authMode === "reset") && (
+                <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")} style={{ width: "100%" }}>
+                  Quay lại đăng nhập
+                </button>
+              )}
             </div>
           </div>
         </div>
