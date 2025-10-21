@@ -21,10 +21,8 @@ from .schemas import (
     DescriptionResponse,
     GenerateTextRequest,
     HistoryItem,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
     MessageResponse,
-    ResetPasswordRequest,
+    ResetPasswordSimpleRequest,
     TokenResponse,
     UserCreate,
     UserOut,
@@ -162,55 +160,18 @@ def login(payload: UserCreate, session: Session = Depends(get_session)) -> Token
     return TokenResponse(access_token=token)
 
 
-@app.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
-def forgot_password(
-    payload: ForgotPasswordRequest,
-    session: Session = Depends(get_session),
-) -> ForgotPasswordResponse:
-    identifier = payload.identifier.strip()
-    message = "Nếu tài khoản tồn tại, mã đặt lại đã được tạo."
-    reset_token: Optional[str] = None
-
-    # Tìm user bằng email hoặc số điện thoại
-    user = None
-    if is_email(identifier):
-        user = session.exec(select(User).where(User.email == identifier.lower())).first()
-    elif is_phone_number(identifier):
-        user = session.exec(select(User).where(User.phone_number == identifier)).first()
-    
-    if not user:
-        return ForgotPasswordResponse(message=message, reset_token=reset_token)
-
-    existing_tokens = session.exec(
-        select(PasswordResetToken)
-        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used.is_(False))
-    ).all()
-    for token in existing_tokens:
-        token.used = True
-        session.add(token)
-
-    raw_token, token_hash = auth.generate_reset_token()
-    reset_entry = PasswordResetToken(
-        user_id=user.id,
-        token_hash=token_hash,
-        expires_at=datetime.utcnow() + timedelta(minutes=30),
-    )
-    session.add(reset_entry)
-    session.commit()
-
-    message = "Mã đặt lại mật khẩu đã được tạo."
-    reset_token = raw_token
-
-    return ForgotPasswordResponse(message=message, reset_token=reset_token)
-
-
-@app.post("/auth/reset-password", response_model=MessageResponse)
-def reset_password(
-    payload: ResetPasswordRequest,
+@app.post("/auth/reset-password-simple", response_model=MessageResponse)
+def reset_password_simple(
+    payload: ResetPasswordSimpleRequest,
     session: Session = Depends(get_session),
 ) -> MessageResponse:
+    """
+    Reset password without verification (INSECURE - for demo/dev only).
+    
+    WARNING: Anyone who knows the email/phone can change the password!
+    This endpoint should be removed or protected in production.
+    """
     identifier = payload.identifier.strip()
-    token_value = payload.token.strip()
     
     # Tìm user bằng email hoặc số điện thoại
     user = None
@@ -220,33 +181,14 @@ def reset_password(
         user = session.exec(select(User).where(User.phone_number == identifier)).first()
     
     if not user:
-        raise HTTPException(status_code=400, detail="Tài khoản hoặc mã đặt lại không hợp lệ")
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại")
 
-    tokens = session.exec(
-        select(PasswordResetToken)
-        .where(
-            PasswordResetToken.user_id == user.id,
-            PasswordResetToken.used.is_(False),
-            PasswordResetToken.expires_at >= datetime.utcnow(),
-        )
-    ).all()
-
-    matched_token = None
-    for token in tokens:
-        if auth.match_reset_token(token_value, token.token_hash):
-            matched_token = token
-            break
-
-    if not matched_token:
-        raise HTTPException(status_code=400, detail="Mã đặt lại không hợp lệ hoặc đã hết hạn")
-
+    # Đổi mật khẩu trực tiếp không cần xác thực
     user.hashed_password = auth.hash_password(payload.new_password)
-    matched_token.used = True
     session.add(user)
-    session.add(matched_token)
     session.commit()
 
-    return MessageResponse(message="Mật khẩu đã được cập nhật. Vui lòng đăng nhập lại.")
+    return MessageResponse(message="Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại.")
 
 
 @app.get("/auth/me", response_model=UserOut)
