@@ -32,13 +32,6 @@ interface HistoryItem {
   image_url?: string | null;
 }
 
-interface HistoryDetail extends HistoryItem {
-  seo_score: number;
-  seo_factors: string[];
-}
-
-
-
 interface ImageItem {
   id: string;
   file: File;
@@ -70,71 +63,14 @@ interface ToastState {
 }
 
 const DEFAULT_STYLES = ["Tiếp thị", "Chuyên nghiệp", "Thân thiện", "Kể chuyện"];
-const SEO_KEYWORDS = [
-  "chất lượng",
-  "tươi",
-  "ngon",
-  "sạch",
-  "dinh dưỡng",
-  "vitamin",
-  "tự nhiên",
-];
-const SEO_CTA = ["đặt hàng", "mua ngay", "gọi ngay", "liên hệ"];
-const SEO_EMOJIS = ["🍎", "🍊", "🍇", "🍌", "🍓", "✨", "💎", "🌟"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const evaluateSeo = (text: string) => {
-  let score = 0;
-  const factors: string[] = [];
-
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  if (wordCount >= 100 && wordCount <= 500) {
-    score += 30;
-    factors.push("✅ Độ dài phù hợp");
-  } else {
-    factors.push(`⚠️ Độ dài: ${wordCount} từ (nên 100-500)`);
-  }
-
-  const foundKeywords = SEO_KEYWORDS.reduce(
-    (acc, keyword) => (text.toLowerCase().includes(keyword.toLowerCase()) ? acc + 1 : acc),
-    0
-  );
-  score += Math.min(foundKeywords * 5, 25);
-  factors.push(`✅ Từ khóa: ${foundKeywords}/${SEO_KEYWORDS.length}`);
-
-  const hashtagCount = (text.match(/#/g) ?? []).length;
-  if (hashtagCount >= 3) {
-    score += 15;
-    factors.push("✅ Có hashtags");
-  } else {
-    factors.push("⚠️ Thiếu hashtags");
-  }
-
-  const hasCta = SEO_CTA.some((cta) => text.toLowerCase().includes(cta));
-  if (hasCta) {
-    score += 15;
-    factors.push("✅ Có call-to-action");
-  } else {
-    factors.push("⚠️ Thiếu call-to-action");
-  }
-
-  const hasEmoji = SEO_EMOJIS.some((emoji) => text.includes(emoji));
-  if (hasEmoji) {
-    score += 15;
-    factors.push("✅ Có emoji");
-  } else {
-    factors.push("⚠️ Thiếu emoji");
-  }
-
-  return { score, factors };
-};
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabKey>("image");
   const [styles, setStyles] = useState<string[]>(DEFAULT_STYLES);
   const [selectedStyle, setSelectedStyle] = useState<string>("Tiếp thị");
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<HistoryItem | null>(null);
 
 
 
@@ -148,7 +84,6 @@ export default function HomePage() {
   const [productInfo, setProductInfo] = useState<string>("");
 
   const [result, setResult] = useState<DescriptionResponse | null>(null);
-  const [seoFactors, setSeoFactors] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
   const [token, setToken] = useState<string | null>(null);
@@ -409,7 +344,6 @@ export default function HomePage() {
       );
 
       setResult(data);
-      setSeoFactors(data.seo_factors);
       if (token) {
         await refreshHistory();
         showToast("success", "Đã tạo mô tả từ hình ảnh và lưu vào lịch sử");
@@ -440,7 +374,6 @@ export default function HomePage() {
         style: selectedStyle,
       });
       setResult(data);
-      setSeoFactors(data.seo_factors);
       if (token) {
         await refreshHistory();
         showToast("success", "Đã tạo mô tả từ văn bản và lưu vào lịch sử");
@@ -731,13 +664,6 @@ export default function HomePage() {
     return images[0];
   }, [images, selectedImageId]);
 
-  const seoScoreClass = useMemo(() => {
-    if (!result) return "";
-    if (result.seo_score >= 70) return "high";
-    if (result.seo_score >= 40) return "medium";
-    return "low";
-  }, [result]);
-
   return (
     <div className="app-container">
       <div className="glass-panel">
@@ -960,16 +886,6 @@ export default function HomePage() {
                 <div className="card">
                   <h2>✨ Kết quả</h2>
                   <p style={{ whiteSpace: "pre-line", lineHeight: 1.7 }}>{result.description}</p>
-                  <div style={{ marginTop: 24 }}>
-                    <span className={`seo-pill ${seoScoreClass}`}>
-                       Điểm SEO: {result.seo_score}/100
-                    </span>
-                  </div>
-                  <ul style={{ marginTop: 16, paddingLeft: 20 }}>
-                    {seoFactors.map((factor) => (
-                      <li key={factor}>{factor}</li>
-                    ))}
-                  </ul>
                   <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
                     <button
                       className="secondary-button"
@@ -1014,16 +930,6 @@ export default function HomePage() {
               <div className="card">
                 <h2> Kết quả</h2>
                 <p style={{ whiteSpace: "pre-line", lineHeight: 1.7 }}>{result.description}</p>
-                <div style={{ marginTop: 24 }}>
-                  <span className={`seo-pill ${seoScoreClass}`}>
-                     Điểm SEO: {result.seo_score}/100
-                  </span>
-                </div>
-                <ul style={{ marginTop: 16, paddingLeft: 20 }}>
-                  {seoFactors.map((factor) => (
-                    <li key={factor}>{factor}</li>
-                  ))}
-                </ul>
                 <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <button
                     className="secondary-button"
@@ -1094,24 +1000,18 @@ export default function HomePage() {
                   <button
                     className="secondary-button"
                     onClick={() => {
-                      const evaluation = evaluateSeo(item.full_description);
                       setActiveTab("text");
-                      setHistoryDetail({
-                        ...item,
-                        seo_score: evaluation.score,
-                        seo_factors: evaluation.factors,
-                      });
+                      setHistoryDetail(item);
                       setResult({
                         description: item.full_description,
-                        seo_score: evaluation.score,
-                        seo_factors: evaluation.factors,
+                        seo_score: 0,
+                        seo_factors: [],
                         history_id: item.id,
                         timestamp: item.timestamp,
                         style: item.style,
                         source: item.source,
                         image_url: item.image_url ?? null,
                       });
-                      setSeoFactors(evaluation.factors);
                     }}
                   >
                     Xem chi tiết
@@ -1123,7 +1023,7 @@ export default function HomePage() {
         </div>
 
         <footer style={{ marginTop: 48, textAlign: "center", color: "var(--text-secondary)" }}>
-          <p> Mẹo: thử nhiều phong cách viết và kiểm tra điểm SEO để tối ưu nội dung.</p>
+          <p> Mẹo: thử nhiều phong cách viết để tìm nội dung phù hợp nhất với sản phẩm.</p>
         </footer>
       </div>
 
@@ -1192,14 +1092,6 @@ export default function HomePage() {
               <button className="secondary-button" onClick={() => setHistoryDetail(null)}>
                 Đóng
               </button>
-            </div>
-            <div>
-              <h3 style={{ marginTop: 0 }}>Điểm SEO: {historyDetail.seo_score}/100</h3>
-              <ul style={{ paddingLeft: 20, color: "var(--text-secondary)" }}>
-                {historyDetail.seo_factors.map((factor) => (
-                  <li key={factor}>{factor}</li>
-                ))}
-              </ul>
             </div>
             {historyDetail.image_url && (
               <div
