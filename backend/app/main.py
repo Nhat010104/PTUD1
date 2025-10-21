@@ -280,6 +280,8 @@ async def generate_description_from_image(
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
     settings = get_settings()
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured.")
 
     try:
         image_bytes = await file.read()
@@ -342,6 +344,8 @@ async def generate_description_from_text(
     session: Session = Depends(get_session),
 ) -> DescriptionResponse:
     settings = get_settings()
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured.")
 
     description = content.generate_from_text(settings.gemini_api_key, payload.product_info, payload.style)
     if not description:
