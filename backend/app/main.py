@@ -106,6 +106,13 @@ def get_current_user(
     return user
 
 
+def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    """Verify that current user is an admin."""
+    if current_user.email != "admin@example.com":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới có quyền truy cập")
+    return current_user
+
+
 @app.post("/auth/register", response_model=TokenResponse)
 def register(payload: UserCreate, session: Session = Depends(get_session)) -> TokenResponse:
     identifier = payload.identifier.strip()
@@ -384,6 +391,23 @@ def get_history(
 def get_styles() -> JSONResponse:
     """Return supported writing styles."""
     return JSONResponse(sorted(content.STYLE_PROMPTS.keys()))
+
+
+@app.get("/users", response_model=list[UserOut])
+def get_all_users(
+    session: Session = Depends(get_session),
+) -> list[UserOut]:
+    """Get all users (no authentication required)."""
+    users = session.exec(select(User)).all()
+    return [
+        UserOut(
+            id=user.id,
+            email=user.email,
+            phone_number=user.phone_number,
+            created_at=user.created_at.isoformat()
+        )
+        for user in users
+    ]
 
 
 
