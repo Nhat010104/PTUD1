@@ -59,7 +59,6 @@ interface TokenResponse {
 
 interface ForgotPasswordResponse {
   message: string;
-  reset_token?: string;
 }
 
 interface MessageResponse {
@@ -86,6 +85,7 @@ const SEO_KEYWORDS = [
 ];
 const SEO_CTA = ["đặt hàng", "mua ngay", "gọi ngay", "liên hệ"];
 const SEO_EMOJIS = ["🍎", "🍊", "🍇", "🍌", "🍓", "✨", "💎", "🌟"];
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const evaluateSeo = (text: string) => {
   let score = 0;
@@ -163,9 +163,9 @@ export default function HomePage() {
   const [authForm, setAuthForm] = useState({ identifier: "", password: "" });
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [resetForm, setResetForm] = useState({ identifier: "", token: "", password: "", confirmPassword: "" });
-  const [resetTokenHint, setResetTokenHint] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [authMessage, setAuthMessage] = useState<{ type: ToastKind; message: string } | null>(null);
+  const [resendLoading, setResendLoading] = useState(false);
 
   const showToast = useCallback((type: ToastKind, message: string) => {
     const id = Date.now();
@@ -536,11 +536,17 @@ export default function HomePage() {
     setAuthLoading(true);
     clearToast();
     setAuthMessage(null);
-    setResetTokenHint(null);
     try {
       const identifier = forgotIdentifier.trim();
       if (!identifier) {
-        const message = "Vui lòng nhập email hoặc số điện thoại đã đăng ký.";
+        const message = "Vui lòng nhập email đã đăng ký.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (!EMAIL_REGEX.test(identifier)) {
+        const message = "Vui lòng nhập email hợp lệ.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -553,11 +559,8 @@ export default function HomePage() {
       setAuthMessage({ type: "success", message: data.message });
       showToast("success", data.message);
       setForgotIdentifier("");
-      if (data.reset_token) {
-        setResetTokenHint(data.reset_token);
-        setResetForm({ identifier, token: data.reset_token, password: "", confirmPassword: "" });
-        setAuthMode("reset");
-      }
+      setResetForm({ identifier, token: "", password: "", confirmPassword: "" });
+      setAuthMode("reset");
     } catch (err: any) {
       let detail = "Không thể tạo mã đặt lại";
       
@@ -590,7 +593,21 @@ export default function HomePage() {
       const password = resetForm.password.trim();
       const confirm = resetForm.confirmPassword.trim();
       if (!identifier || !tokenValue || !password) {
-        const message = "Vui lòng nhập đầy đủ email/số điện thoại, mã đặt lại và mật khẩu mới.";
+        const message = "Vui lòng nhập đầy đủ email, mã đặt lại và mật khẩu mới.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (!EMAIL_REGEX.test(identifier)) {
+        const message = "Vui lòng nhập email hợp lệ.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (tokenValue.length !== 6) {
+        const message = "Mã đặt lại gồm 6 chữ số.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -611,7 +628,6 @@ export default function HomePage() {
       setAuthMessage({ type: "success", message: data.message });
       showToast("success", data.message);
       setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
-      setResetTokenHint(null);
       setAuthMode("login");
       setAuthForm({ identifier, password: "" });
     } catch (err: any) {
@@ -635,12 +651,54 @@ export default function HomePage() {
     }
   };
 
+  const handleResendCode = async () => {
+    clearToast();
+    setAuthMessage(null);
+    const identifier = resetForm.identifier.trim() || forgotIdentifier.trim();
+    if (!identifier) {
+      const message = "Vui lòng nhập email đã đăng ký trước khi gửi lại mã.";
+      setAuthMessage({ type: "error", message });
+      showToast("error", message);
+      return;
+    }
+    if (!EMAIL_REGEX.test(identifier)) {
+      const message = "Vui lòng nhập email hợp lệ.";
+      setAuthMessage({ type: "error", message });
+      showToast("error", message);
+      return;
+    }
+    setResendLoading(true);
+    try {
+      const { data } = await axios.post<ForgotPasswordResponse>(`${API_BASE_URL}/auth/forgot-password`, { identifier });
+      setAuthMessage({ type: "success", message: data.message });
+      showToast("success", data.message);
+      setResetForm((prev) => ({ ...prev, identifier, token: "" }));
+    } catch (err: any) {
+      let detail = "Không thể gửi lại mã";
+
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        } else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+
+      setAuthMessage({ type: "error", message: detail });
+      showToast("error", detail);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   const changeAuthMode = (mode: AuthMode) => {
     setAuthMode(mode);
     setAuthMessage(null);
     setAuthLoading(false);
     if (mode !== "reset") {
-      setResetTokenHint(null);
       setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
     }
     if (mode !== "forgot") {
@@ -1262,23 +1320,6 @@ export default function HomePage() {
                 {authMessage.message}
               </div>
             )}
-            {authMode === "reset" && resetTokenHint && (
-              <div
-                style={{
-                  border: "1px solid rgba(56,161,105,0.45)",
-                  background: "rgba(56,161,105,0.12)",
-                  color: "#276749",
-                  borderRadius: 16,
-                  padding: 14,
-                  textAlign: "center",
-                  fontWeight: 600,
-                  wordBreak: "break-all",
-                }}
-              >
-                <div>Mã đặt lại của bạn:</div>
-                <code style={{ display: "block", marginTop: 8 }}>{resetTokenHint}</code>
-              </div>
-            )}
             {(authMode === "login" || authMode === "register") && (
               <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
@@ -1305,7 +1346,7 @@ export default function HomePage() {
               <form onSubmit={handleForgotSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
                   type="text"
-                  placeholder="Nhập email hoặc số điện thoại đã đăng ký"
+                  placeholder="Nhập email đã đăng ký"
                   value={forgotIdentifier}
                   onChange={(event) => setForgotIdentifier(event.target.value)}
                   required
@@ -1319,18 +1360,35 @@ export default function HomePage() {
               <form onSubmit={handleResetSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
                   type="text"
-                  placeholder="Email hoặc Số điện thoại"
+                  placeholder="Email đã đăng ký"
                   value={resetForm.identifier}
                   onChange={(event) => setResetForm((prev) => ({ ...prev, identifier: event.target.value }))}
                   required
                 />
-                <input
-                  type="text"
-                  placeholder="Mã đặt lại"
-                  value={resetForm.token}
-                  onChange={(event) => setResetForm((prev) => ({ ...prev, token: event.target.value }))}
-                  required
-                />
+                <div style={{ display: "flex", gap: 12 }}>
+                  <input
+                    type="text"
+                    placeholder="Mã đặt lại (6 chữ số)"
+                    value={resetForm.token}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/\D/g, "");
+                      setResetForm((prev) => ({ ...prev, token: value }));
+                    }}
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={handleResendCode}
+                    disabled={resendLoading || authLoading}
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    {resendLoading ? "Đang gửi..." : "Gửi lại mã"}
+                  </button>
+                </div>
                 <input
                   type="password"
                   placeholder="Mật khẩu mới"

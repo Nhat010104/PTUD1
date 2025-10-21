@@ -29,7 +29,7 @@ from .schemas import (
     UserCreate,
     UserOut,
 )
-from .services import auth, content, history as history_service, seo
+from .services import auth, content, email as email_service, history as history_service, seo
 from sqlmodel import Session, select
 
 
@@ -168,18 +168,17 @@ def forgot_password(
     session: Session = Depends(get_session),
 ) -> ForgotPasswordResponse:
     identifier = payload.identifier.strip()
-    message = "Nếu tài khoản tồn tại, mã đặt lại đã được tạo."
-    reset_token: Optional[str] = None
+    message = "Nếu tài khoản tồn tại, mã đặt lại sẽ được gửi qua email."
 
-    # Tìm user bằng email hoặc số điện thoại
-    user = None
-    if is_email(identifier):
-        user = session.exec(select(User).where(User.email == identifier.lower())).first()
-    elif is_phone_number(identifier):
-        user = session.exec(select(User).where(User.phone_number == identifier)).first()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập email đã đăng ký")
+    if not is_email(identifier):
+        raise HTTPException(status_code=400, detail="Vui lòng nhập email hợp lệ")
+
+    user = session.exec(select(User).where(User.email == identifier.lower())).first()
     
-    if not user:
-        return ForgotPasswordResponse(message=message, reset_token=reset_token)
+    if not user or not user.email:
+        return ForgotPasswordResponse(message=message)
 
     existing_tokens = session.exec(
         select(PasswordResetToken)
@@ -198,10 +197,16 @@ def forgot_password(
     session.add(reset_entry)
     session.commit()
 
-    message = "Mã đặt lại mật khẩu đã được tạo."
-    reset_token = raw_token
+    try:
+        email_service.send_password_reset_email(user.email, raw_token)
+    except email_service.EmailConfigurationError as exc:
+        raise HTTPException(status_code=500, detail="Hệ thống chưa cấu hình email khôi phục") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="Không thể gửi email khôi phục") from exc
 
-    return ForgotPasswordResponse(message=message, reset_token=reset_token)
+    message = "Mã đặt lại mật khẩu đã được gửi qua email."
+
+    return ForgotPasswordResponse(message=message)
 
 
 @app.post("/auth/reset-password", response_model=MessageResponse)

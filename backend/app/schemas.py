@@ -49,16 +49,15 @@ class UserOut(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    identifier: str  # Email hoặc số điện thoại
+    identifier: str  # Email
 
 
 class ForgotPasswordResponse(BaseModel):
     message: str
-    reset_token: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
-    identifier: str  # Email hoặc số điện thoại
+    identifier: str  # Email
     token: str
     new_password: str = Field(min_length=6)
 
