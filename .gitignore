@@ -18,3 +18,8 @@ node_modules/
 frontend/.next/
 frontend/node_modules/
 frontend/out/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
