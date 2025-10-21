@@ -80,7 +80,7 @@ Giọng văn nên giàu cảm xúc, mời gọi và truyền cảm hứng mua h�
 #️⃣ Từ khóa:
 [5-7 hashtag hoặc từ khóa phổ biến, cách nhau bằng dấu phẩy]
 
-Viết bằng TIẾNG VIỆT tự nhiên, cảm xúc, mạch lạc và mang năng lượng tích cực.
+Viết bằng TIẾNG VIỆT tự nhiên, cảm xúc, mạch lạc và mang năng lượng tích cực.và kết quả trả về không có giấu *
 """
 
 
