@@ -122,19 +122,24 @@ Hãy khiến người đọc như đang “nếm thử bằng trí tưởng tư�
 [5-7 hashtag hoặc từ khóa tìm kiếm, ngăn cách bằng dấu phẩy]
 
 Viết TIẾNG VIỆT tự nhiên, tràn đầy năng lượng, truyền cảm hứng mua hàng.
+không có giấu * trong mô tả của tôi
 """
 
+
+
+def _sanitize_output(text: str) -> str:
+    return text.replace("*", "")
 
 
 def generate_from_image(api_key: str, image: Image.Image, style: str) -> str:
     """Generate a product description from an image."""
     model = get_model(api_key)
     response = model.generate_content([_image_prompt(style), image])
-    return response.text if response else ""
+    return _sanitize_output(response.text) if response and response.text else ""
 
 
 def generate_from_text(api_key: str, product_info: str, style: str) -> str:
     """Generate a product description from product information text."""
     model = get_model(api_key)
     response = model.generate_content(_text_prompt(product_info, style))
-    return response.text if response else ""
+    return _sanitize_output(response.text) if response and response.text else ""

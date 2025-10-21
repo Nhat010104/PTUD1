@@ -48,8 +48,18 @@ class UserOut(BaseModel):
     created_at: str
 
 
-class ResetPasswordSimpleRequest(BaseModel):
-    identifier: str  # Email hoặc số điện thoại
+class ForgotPasswordRequest(BaseModel):
+    identifier: str
+
+
+class ResetPasswordRequest(BaseModel):
+    identifier: str
+    token: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=6)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=6)
     new_password: str = Field(min_length=6)
 
 

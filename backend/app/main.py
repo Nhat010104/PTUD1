@@ -18,16 +18,18 @@ from .config import get_settings
 from .db.models import Description, PasswordResetToken, User
 from .db.session import engine, get_session, init_db
 from .schemas import (
+    ChangePasswordRequest,
     DescriptionResponse,
+    ForgotPasswordRequest,
     GenerateTextRequest,
     HistoryItem,
     MessageResponse,
-    ResetPasswordSimpleRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserCreate,
     UserOut,
 )
-from .services import auth, content, history as history_service, seo
+from .services import auth, content, email as email_service, history as history_service, seo
 from sqlmodel import Session, select
 
 
@@ -160,35 +162,104 @@ def login(payload: UserCreate, session: Session = Depends(get_session)) -> Token
     return TokenResponse(access_token=token)
 
 
-@app.post("/auth/reset-password-simple", response_model=MessageResponse)
-def reset_password_simple(
-    payload: ResetPasswordSimpleRequest,
+@app.post("/auth/forgot-password", response_model=MessageResponse)
+def forgot_password(
+    payload: ForgotPasswordRequest,
     session: Session = Depends(get_session),
 ) -> MessageResponse:
-    """
-    Reset password without verification (INSECURE - for demo/dev only).
-    
-    WARNING: Anyone who knows the email/phone can change the password!
-    This endpoint should be removed or protected in production.
-    """
     identifier = payload.identifier.strip()
-    
-    # Tìm user bằng email hoặc số điện thoại
-    user = None
-    if is_email(identifier):
-        user = session.exec(select(User).where(User.email == identifier.lower())).first()
-    elif is_phone_number(identifier):
-        user = session.exec(select(User).where(User.phone_number == identifier)).first()
-    
-    if not user:
-        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại")
+    if not is_email(identifier):
+        raise HTTPException(status_code=400, detail="Vui lòng nhập email hợp lệ")
 
-    # Đổi mật khẩu trực tiếp không cần xác thực
+    email = identifier.lower()
+    user = session.exec(select(User).where(User.email == email)).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Email chưa được đăng ký")
+
+    existing_tokens = session.exec(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used == False,
+        )
+    ).all()
+    for token in existing_tokens:
+        token.used = True
+
+    code, token_hash = auth.generate_reset_token()
+    reset_entry = PasswordResetToken(user_id=user.id, token_hash=token_hash)
+    session.add(reset_entry)
+
+    try:
+        email_service.send_password_reset_code(email, code)
+    except RuntimeError as exc:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    session.commit()
+    return MessageResponse(message="Đã gửi mã xác thực tới email của bạn.")
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    session: Session = Depends(get_session),
+) -> MessageResponse:
+    identifier = payload.identifier.strip()
+    if not is_email(identifier):
+        raise HTTPException(status_code=400, detail="Vui lòng nhập email hợp lệ")
+
+    email = identifier.lower()
+    user = session.exec(select(User).where(User.email == email)).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Email chưa được đăng ký")
+
+    token_entry = session.exec(
+        select(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used == False,
+        )
+        .order_by(PasswordResetToken.created_at.desc())
+    ).first()
+
+    if not token_entry or not auth.match_reset_token(payload.token, token_entry.token_hash):
+        raise HTTPException(status_code=400, detail="Mã xác thực không hợp lệ")
+
+    if token_entry.expires_at < datetime.utcnow():
+        token_entry.used = True
+        session.commit()
+        raise HTTPException(status_code=400, detail="Mã xác thực đã hết hạn")
+
     user.hashed_password = auth.hash_password(payload.new_password)
+    token_entry.used = True
     session.add(user)
+    session.add(token_entry)
     session.commit()
 
-    return MessageResponse(message="Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại.")
+    return MessageResponse(message="Mật khẩu đã được đặt lại thành công.")
+
+
+@app.post("/auth/change-password", response_model=MessageResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> MessageResponse:
+    db_user = session.get(User, current_user.id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+    if not auth.verify_password(payload.current_password, db_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không chính xác")
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại")
+
+    db_user.hashed_password = auth.hash_password(payload.new_password)
+    session.add(db_user)
+    session.commit()
+
+    return MessageResponse(message="Đã đổi mật khẩu thành công.")
 
 
 @app.get("/auth/me", response_model=UserOut)

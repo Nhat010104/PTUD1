@@ -7,7 +7,7 @@ import axios from "axios";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 type TabKey = "image" | "text";
-type AuthMode = "login" | "register" | "reset";
+type AuthMode = "login" | "register" | "forgot" | "reset";
 
 interface DescriptionResponse {
   description: string;
@@ -57,11 +57,6 @@ interface TokenResponse {
   token_type: string;
 }
 
-interface ForgotPasswordResponse {
-  message: string;
-  reset_token?: string;
-}
-
 interface MessageResponse {
   message: string;
 }
@@ -86,6 +81,7 @@ const SEO_KEYWORDS = [
 ];
 const SEO_CTA = ["đặt hàng", "mua ngay", "gọi ngay", "liên hệ"];
 const SEO_EMOJIS = ["🍎", "🍊", "🍇", "🍌", "🍓", "✨", "💎", "🌟"];
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const evaluateSeo = (text: string) => {
   let score = 0;
@@ -161,7 +157,11 @@ export default function HomePage() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authForm, setAuthForm] = useState({ identifier: "", password: "" });
-  const [resetForm, setResetForm] = useState({ identifier: "", password: "", confirmPassword: "" });
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetForm, setResetForm] = useState({ identifier: "", token: "", password: "", confirmPassword: "" });
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [changePasswordForm, setChangePasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [toast, setToast] = useState<ToastState | null>(null);
   const [authMessage, setAuthMessage] = useState<{ type: ToastKind; message: string } | null>(null);
 
@@ -529,6 +529,54 @@ export default function HomePage() {
     }
   };
 
+  const handleForgotSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    clearToast();
+    setAuthMessage(null);
+    try {
+      const email = forgotEmail.trim();
+      if (!email) {
+        const message = "Vui lòng nhập email đã đăng ký.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (!EMAIL_REGEX.test(email)) {
+        const message = "Vui lòng nhập email hợp lệ.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/forgot-password`, {
+        identifier: email,
+      });
+      setAuthMessage({ type: "success", message: data.message });
+      showToast("success", data.message);
+      setResetForm({ identifier: email, token: "", password: "", confirmPassword: "" });
+      setForgotEmail("");
+      setAuthMode("reset");
+    } catch (err: any) {
+      let detail = "Không thể gửi mã xác thực";
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        } else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+      setAuthMessage({ type: "error", message: detail });
+      showToast("error", detail);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleResetSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setAuthLoading(true);
@@ -536,10 +584,25 @@ export default function HomePage() {
     setAuthMessage(null);
     try {
       const identifier = resetForm.identifier.trim();
+      const tokenValue = resetForm.token.trim();
       const password = resetForm.password.trim();
       const confirm = resetForm.confirmPassword.trim();
-      if (!identifier || !password) {
-        const message = "Vui lòng nhập đầy đủ email/số điện thoại và mật khẩu mới.";
+      if (!identifier || !tokenValue || !password) {
+        const message = "Vui lòng nhập đầy đủ email, mã xác thực và mật khẩu mới.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (!EMAIL_REGEX.test(identifier)) {
+        const message = "Vui lòng nhập email hợp lệ.";
+        setAuthMessage({ type: "error", message });
+        showToast("error", message);
+        setAuthLoading(false);
+        return;
+      }
+      if (tokenValue.length !== 6) {
+        const message = "Mã xác thực gồm 6 chữ số.";
         setAuthMessage({ type: "error", message });
         showToast("error", message);
         setAuthLoading(false);
@@ -552,13 +615,14 @@ export default function HomePage() {
         setAuthLoading(false);
         return;
       }
-      const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/reset-password-simple`, {
+      const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/reset-password`, {
         identifier,
+        token: tokenValue,
         new_password: password,
       });
       setAuthMessage({ type: "success", message: data.message });
       showToast("success", data.message);
-      setResetForm({ identifier: "", password: "", confirmPassword: "" });
+      setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
       setAuthMode("login");
       setAuthForm({ identifier, password: "" });
     } catch (err: any) {
@@ -586,8 +650,59 @@ export default function HomePage() {
     setAuthMode(mode);
     setAuthMessage(null);
     setAuthLoading(false);
+    if (mode !== "forgot") {
+      setForgotEmail("");
+    }
     if (mode !== "reset") {
-      setResetForm({ identifier: "", password: "", confirmPassword: "" });
+      setResetForm({ identifier: "", token: "", password: "", confirmPassword: "" });
+    }
+  };
+
+  const handleChangePasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setChangePasswordLoading(true);
+    clearToast();
+    try {
+      const current = changePasswordForm.currentPassword.trim();
+      const next = changePasswordForm.newPassword.trim();
+      const confirm = changePasswordForm.confirmPassword.trim();
+      if (!current || !next) {
+        showToast("error", "Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới.");
+        setChangePasswordLoading(false);
+        return;
+      }
+      if (next !== confirm) {
+        showToast("error", "Mật khẩu xác nhận không khớp.");
+        setChangePasswordLoading(false);
+        return;
+      }
+      if (current === next) {
+        showToast("error", "Mật khẩu mới phải khác mật khẩu hiện tại.");
+        setChangePasswordLoading(false);
+        return;
+      }
+      const { data } = await axios.post<MessageResponse>(`${API_BASE_URL}/auth/change-password`, {
+        current_password: current,
+        new_password: next,
+      });
+      showToast("success", data.message);
+      setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setChangePasswordVisible(false);
+    } catch (err: any) {
+      let detail = "Không thể đổi mật khẩu";
+      if (err?.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (Array.isArray(errorDetail)) {
+          detail = errorDetail.map((e: any) => e.msg || e.message).join(", ");
+        } else if (typeof errorDetail === "string") {
+          detail = errorDetail;
+        } else if (typeof errorDetail === "object") {
+          detail = errorDetail.msg || errorDetail.message || JSON.stringify(errorDetail);
+        }
+      }
+      showToast("error", detail);
+    } finally {
+      setChangePasswordLoading(false);
     }
   };
 
@@ -639,9 +754,20 @@ export default function HomePage() {
                 <span style={{ color: "var(--text-secondary)" }}>
                   {user?.email || user?.phone_number}
                 </span>
-                <button className="secondary-button" onClick={handleLogout}>
-                  Đăng xuất
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setChangePasswordVisible(true);
+                      setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                    }}
+                  >
+                    Đổi mật khẩu
+                  </button>
+                  <button className="secondary-button" onClick={handleLogout}>
+                    Đăng xuất
+                  </button>
+                </div>
               </div>
             ) : (
               <button
@@ -1225,13 +1351,39 @@ export default function HomePage() {
                 </button>
               </form>
             )}
+            {authMode === "forgot" && (
+              <form onSubmit={handleForgotSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <input
+                  type="email"
+                  placeholder="Nhập email đã đăng ký"
+                  value={forgotEmail}
+                  onChange={(event) => setForgotEmail(event.target.value)}
+                  required
+                />
+                <button className="primary-button" type="submit" disabled={authLoading}>
+                  {authLoading ? "Đang xử lý..." : "Gửi mã xác thực"}
+                </button>
+              </form>
+            )}
             {authMode === "reset" && (
               <form onSubmit={handleResetSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <input
-                  type="text"
-                  placeholder="Email hoặc Số điện thoại"
+                  type="email"
+                  placeholder="Email đã đăng ký"
                   value={resetForm.identifier}
                   onChange={(event) => setResetForm((prev) => ({ ...prev, identifier: event.target.value }))}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Mã xác thực (6 chữ số)"
+                  value={resetForm.token}
+                  onChange={(event) => {
+                    const value = event.target.value.replace(/\D/g, "");
+                    setResetForm((prev) => ({ ...prev, token: value }));
+                  }}
+                  inputMode="numeric"
+                  maxLength={6}
                   required
                 />
                 <input
@@ -1261,7 +1413,7 @@ export default function HomePage() {
                   <button className="secondary-button" type="button" onClick={() => changeAuthMode("register")} style={{ flex: 1 }}>
                      Đăng ký tài khoản
                   </button>
-                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("reset")} style={{ flex: 1 }}>
+                  <button className="secondary-button" type="button" onClick={() => changeAuthMode("forgot")} style={{ flex: 1 }}>
                     Quên mật khẩu
                   </button>
                 </>
@@ -1271,12 +1423,107 @@ export default function HomePage() {
                   Đã có tài khoản? Đăng nhập
                 </button>
               )}
-              {authMode === "reset" && (
+              {(authMode === "reset" || authMode === "forgot") && (
                 <button className="secondary-button" type="button" onClick={() => changeAuthMode("login")} style={{ width: "100%" }}>
                   Quay lại đăng nhập
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {changePasswordVisible && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              background: "#fff",
+              borderRadius: 24,
+              padding: 32,
+              boxShadow: "0 24px 60px rgba(0,0,0,0.12)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              position: "relative",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setChangePasswordVisible(false);
+                setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+              }}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "rgba(0,0,0,0.08)",
+                color: "var(--text-primary)",
+                border: "none",
+                borderRadius: "50%",
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 20,
+                fontWeight: 600,
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(0,0,0,0.08)";
+              }}
+              aria-label="Đóng"
+            >
+              ✕
+            </button>
+            <h2 style={{ margin: 0, textAlign: "center" }}>Đổi mật khẩu</h2>
+            <form onSubmit={handleChangePasswordSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <input
+                type="password"
+                placeholder="Mật khẩu hiện tại"
+                value={changePasswordForm.currentPassword}
+                onChange={(event) => setChangePasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))}
+                required
+                minLength={6}
+              />
+              <input
+                type="password"
+                placeholder="Mật khẩu mới"
+                value={changePasswordForm.newPassword}
+                onChange={(event) => setChangePasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))}
+                required
+                minLength={6}
+              />
+              <input
+                type="password"
+                placeholder="Nhập lại mật khẩu mới"
+                value={changePasswordForm.confirmPassword}
+                onChange={(event) => setChangePasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                required
+                minLength={6}
+              />
+              <button className="primary-button" type="submit" disabled={changePasswordLoading}>
+                {changePasswordLoading ? "Đang xử lý..." : "Cập nhật mật khẩu"}
+              </button>
+            </form>
           </div>
         </div>
       )}
