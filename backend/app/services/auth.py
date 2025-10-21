@@ -48,8 +48,9 @@ def decode_access_token(token: str) -> Optional[str]:
         return None
 
 
-def generate_reset_token() -> tuple[str, str]:
-    token = secrets.token_urlsafe(32)
+def generate_reset_token(length: int = 6) -> tuple[str, str]:
+    digits = "0123456789"
+    token = "".join(secrets.choice(digits) for _ in range(length))
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     return token, token_hash
 
